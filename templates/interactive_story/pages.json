@@ -1,0 +1,76 @@
+{
+  "start": {
+    "title": "岔路口",
+    "text": "黄昏时，你站在一条分岔的小路前。左边通向森林，右边亮着村庄的灯。",
+    "choices": [
+      {
+        "text": "走进森林",
+        "next": "forest"
+      },
+      {
+        "text": "回到村庄",
+        "next": "village"
+      }
+    ]
+  },
+  "forest": {
+    "title": "森林",
+    "text": "林中传来短促的鸟鸣。你发现树干上刻着一个熟悉的记号。",
+    "choices": [
+      {
+        "text": "记住这个记号",
+        "next": "clue",
+        "actions": [
+          {
+            "type": "set_variable",
+            "path": "records.remembered_clue",
+            "value": true
+          },
+          {
+            "type": "modify_variable",
+            "path": "variables.trust",
+            "amount": 1
+          }
+        ]
+      },
+      {
+        "text": "返回岔路口",
+        "next": "start"
+      }
+    ]
+  },
+  "village": {
+    "title": "村庄",
+    "text": "村口的灯还亮着。一个陌生人正在等你。",
+    "choices": [
+      {
+        "text": "询问陌生人",
+        "next": "meeting"
+      },
+      {
+        "text": "返回岔路口",
+        "next": "start"
+      }
+    ]
+  },
+  "clue": {
+    "title": "记号",
+    "text": "你把记号记在心里。它也许会在之后指引你。",
+    "choices": [
+      {
+        "text": "回到岔路口",
+        "next": "start"
+      }
+    ]
+  },
+  "meeting": {
+    "title": "陌生人",
+    "text": "陌生人看见你手里的地图，终于露出放松的神情。",
+    "choices": [
+      {
+        "text": "结束故事",
+        "next": null
+      }
+    ]
+  }
+}

@@ -13,7 +13,13 @@ from .save_manager import SaveManager
 from .auth_manager import AuthManager
 from .event_rules import DeclarativeRules
 from . import beat_combat
-from .runtime import ActionContext, ActionRegistry, RuntimeDefinition, RuntimeState
+from .runtime import (
+    ActionContext,
+    ActionRegistry,
+    InteractiveStoryRuntime,
+    RuntimeDefinition,
+    RuntimeState,
+)
 
 __all__ = [
     "EventBus",
@@ -30,6 +36,7 @@ __all__ = [
     "beat_combat",
     "ActionContext",
     "ActionRegistry",
+    "InteractiveStoryRuntime",
     "RuntimeDefinition",
     "RuntimeState",
 ]

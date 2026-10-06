@@ -10,7 +10,13 @@ import uuid
 import random
 
 # ---------- 导入引擎模块 ----------
-from engine import SessionManager, SaveManager, AuthManager, beat_combat
+from engine import (
+    SessionManager,
+    SaveManager,
+    AuthManager,
+    InteractiveStoryRuntime,
+    beat_combat,
+)
 from engine.editor_manager import EditorManager
 
 # ---------- Flask 初始化 ----------
