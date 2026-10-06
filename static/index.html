@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文字游戏引擎 MVP</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- 模式选择覆盖层（首次进入显示，选完隐藏） -->
+    <div id="mode-overlay">
+        <h2 id="game-title-mode">文字游戏引擎</h2>
+        <p class="game-intro" id="game-intro" style="display:none;"></p>
+        <p class="mode-subtitle">选择进入模式</p>
+        <div class="mode-buttons">
+            <div class="mode-card" onclick="chooseMode('offline')">
+                <div class="mode-title">离线模式</div>
+                <div class="mode-desc">
+                    单机畅玩，无需登录<br>
+                    自动存档 + 多槽手动存档<br>
+                    存档存在本地 SQLite<br>
+                    适合个人体验 / GitHub clone
+                </div>
+            </div>
+            <!--
+              在线模式（多人）自 2026-10-03 起从模式选择页屏蔽：会话隔离/登录/在线存档
+              这一整套是为多人模式服务的，当前没有多人需求，历史上还因隔离逻辑产生过
+              大量排查成本。后端接口与 auth 代码全部保留，仅隐藏入口。
+              需要重新开放多人时：
+                1) 删除下面卡片的 style="display:none"；
+                2) 移除 js/ui.js chooseMode() 里的 ONLINE_DISABLED 拦截；
+                3) 重新规划在线/离线隔离与测试方案（见 README.md「在线模式」一节）。
+            -->
+            <div class="mode-card online" style="display:none;" onclick="chooseMode('online')">
+                <div class="mode-title">在线模式</div>
+                <div class="mode-desc">
+                    多人同场，需账号登录<br>
+                    服务器实时存档<br>
+                    其他玩家名字会出现在同场景<br>
+                    <span style="color:#e94560;font-size:0.75rem;">（暂未开放，敬请期待）</span>
+                </div>
+            </div>
+            <div class="mode-card editor" onclick="location.href='/static/editor.html'">
+                <div class="mode-title">编辑模式</div>
+                <div class="mode-desc">
+                    可视化制作游戏内容<br>
+                    编辑地点 / 物品 / 商店货物<br>
+                    修改自动备份，即改即玩<br>
+                    <span style="color:#4d9fff;font-size:0.75rem;">仅本地部署可用</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录/注册覆盖层（选在线模式后弹出，登录成功自动进入游戏） -->
+    <div id="auth-overlay">
+        <div class="auth-card">
+            <h2>在线模式登录</h2>
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="switchAuthTab('login')">登录</button>
+                <button class="auth-tab" onclick="switchAuthTab('register')">注册</button>
+            </div>
+            <!-- 登录表单 -->
+            <div id="auth-form-login">
+                <div class="auth-form-group">
+                    <label>用户名</label>
+                    <input type="text" id="auth-login-username" placeholder="请输入用户名" autocomplete="username">
+                </div>
+                <div class="auth-form-group">
+                    <label>密码</label>
+                    <input type="password" id="auth-login-password" placeholder="请输入密码" autocomplete="current-password">
+                </div>
+                <button class="auth-submit" onclick="doLogin()">登录</button>
+            </div>
+            <!-- 注册表单 -->
+            <div id="auth-form-register" style="display:none;">
+                <div class="auth-form-group">
+                    <label>用户名（2-32字符）</label>
+                    <input type="text" id="auth-reg-username" placeholder="请输入用户名">
+                </div>
+                <div class="auth-form-group">
+                    <label>密码（至少4字符）</label>
+                    <input type="password" id="auth-reg-password" placeholder="请输入密码">
+                </div>
+                <div class="auth-form-group">
+                    <label>确认密码</label>
+                    <input type="password" id="auth-reg-password2" placeholder="请再次输入密码">
+                </div>
+                <button class="auth-submit" onclick="doRegister()">注册并登录</button>
+            </div>
+            <div id="auth-message" class="auth-message"></div>
+            <button class="auth-back-btn" onclick="backToModeSelect()">← 返回模式选择</button>
+        </div>
+    </div>
+
+    <!-- 离线模式启动弹窗：新游戏 / 继续 / 载入 -->
+    <div id="offline-start-overlay" class="hidden">
+        <div class="offline-start-card">
+            <h2>离线模式</h2>
+            <p class="mode-subtitle">你想怎么开始？</p>
+            <div class="offline-options">
+                <div class="offline-opt-card" onclick="newOfflineGame()">
+                    <div class="mode-title">新游戏</div>
+                    <div class="mode-desc">从酒馆重新开始<br>当前进度将丢失</div>
+                </div>
+                <div class="offline-opt-card" id="continue-card" onclick="continueOfflineGame()">
+                    <div class="mode-title">继续游戏</div>
+                    <div class="mode-desc" id="continue-desc">加载最新自动存档</div>
+                </div>
+                <div class="offline-opt-card" id="load-card" onclick="openLoadPanel()">
+                    <div class="mode-title">载入游戏</div>
+                    <div class="mode-desc">选择存档槽位载入</div>
+                </div>
+            </div>
+            <button class="auth-back-btn" onclick="backToModeSelect()">← 返回模式选择</button>
+        </div>
+    </div>
+
+    <!-- ESC 菜单覆盖层 -->
+    <div id="esc-menu-overlay" class="hidden">
+        <div class="esc-menu-card">
+            <h2>游戏菜单</h2>
+            <div class="esc-menu-items">
+                <div class="esc-menu-item" id="esc-quick-save" onclick="doQuickSave()">
+                    <span>快速保存（F5）</span>
+                </div>
+                <div class="esc-menu-item" id="esc-save-mgmt" onclick="openSavePanelFromMenu()">
+                    <span>存档管理</span>
+                </div>
+                <div class="esc-menu-item danger" onclick="returnToModeSelect()">
+                    <span>返回模式选择</span>
+                </div>
+                <div class="esc-menu-item" onclick="closeEscMenu()">
+                    <span>关闭菜单</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 存档管理弹窗（点击 存档 / ESC 菜单 → 存档管理 打开） -->
+    <div id="save-overlay" class="modal-overlay hidden">
+        <div class="save-panel" id="save-panel">
+            <h3>
+                存档管理
+                <button id="close-save-btn" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:1rem;">✕</button>
+            </h3>
+            <div id="save-slots"></div>
+        </div>
+    </div>
+
+    <!-- 背包弹窗（点击底栏 背包 按钮打开） -->
+    <div id="inventory-overlay" class="modal-overlay hidden">
+        <div class="inventory" id="inventory-card">
+            <h3>
+                玩家背包
+                <button id="close-inventory-btn" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:1rem;">✕</button>
+            </h3>
+            <div class="items" id="player-inventory">
+                <span class="empty">（背包是空的）</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 顶部标题栏（薄） -->
+    <header>
+        <h1>文字游戏引擎</h1>
+        <div class="header-hints">
+            <span><kbd>~</kbd> 控制台</span>
+            <span><kbd>ESC</kbd> 菜单</span>
+            <span id="mode-badge" style="display:none;"></span>
+            <span id="online-user-label" style="display:none;"></span>
+        </div>
+    </header>
+
+    <!-- 主游戏区 -->
+    <main>
+        <!-- 场景卡片 -->
+        <div class="scene-card">
+            <h2 id="scene-name">加载中...</h2>
+            <p class="description" id="scene-desc">正在从服务器获取场景数据...</p>
+
+            <!-- 可拿取的物品 -->
+            <div class="interact-section">
+                <h3>可拿取的物品</h3>
+                <div class="button-list" id="items-list">
+                    <span style="color:#64748b;">（这里没有物品）</span>
+                </div>
+            </div>
+
+            <!-- 场景商店（花金币购买，无货物时整块隐藏） -->
+            <div class="interact-section" id="shop-section" style="display:none;">
+                <h3>商店</h3>
+                <div class="button-list" id="shop-list"></div>
+            </div>
+
+            <!-- 可走的出口 -->
+            <div class="interact-section">
+                <h3>可前往的出口</h3>
+                <div class="button-list" id="exits-list">
+                    <span style="color:#64748b;">（这里没有出口）</span>
+                </div>
+            </div>
+
+            <!-- 场景里的 NPC（主动触发对话） -->
+            <div class="interact-section" id="npc-section" style="display:none;">
+                <h3>可对话的 NPC</h3>
+                <div class="button-list" id="npc-list"></div>
+            </div>
+
+            <!-- 场景里的敌人（主动触发战斗） -->
+            <div class="interact-section" id="enemy-section" style="display:none;">
+                <h3>可挑战的敌人</h3>
+                <div class="button-list" id="enemy-list"></div>
+            </div>
+
+            <!-- 操作消息提示 -->
+            <div class="message" id="action-message">欢迎来到文字游戏引擎！点击上面的按钮开始探索吧。</div>
+        </div>
+
+        <!-- NPC 对话面板（默认隐藏，有对话才显示） -->
+        <div class="dialogue-panel" id="dialogue-panel">
+            <div class="dialogue-header">
+                <span class="dialogue-name" id="dialogue-name">NPC</span>
+            </div>
+            <div class="dialogue-text" id="dialogue-text">对话内容加载中...</div>
+            <div class="dialogue-choices" id="dialogue-choices"></div>
+            <button class="dialogue-close-btn" id="dialogue-close">（跳过对话）</button>
+        </div>
+
+        <!-- 战斗面板（默认隐藏，玩家点"挑战"后弹出） -->
+        <div class="combat-panel" id="combat-panel">
+            <div class="combat-header">
+                <div class="enemy-info">
+                    <h3 id="enemy-name">敌人</h3>
+                    <div class="hp-bar-container">
+                        <div class="hp-bar-fill" id="enemy-hp-bar" style="width:100%"></div>
+                    </div>
+                    <div class="hp-text" id="enemy-hp-text">HP: 30/30</div>
+                </div>
+            </div>
+            <!-- 战斗日志 -->
+            <div class="combat-log" id="combat-log">
+                <span class="log-system">战斗开始！</span>
+            </div>
+            <!-- 玩家HP -->
+            <div class="player-hp-row">
+                <span class="player-label">你</span>
+                <div class="hp-bar-container">
+                    <div class="hp-bar-fill" id="player-hp-bar" style="width:100%; background:linear-gradient(90deg,#4ade80,#22c55e);"></div>
+                </div>
+                <span class="hp-text" id="player-hp-text">HP: 50/50</span>
+            </div>
+            <!-- Beat 制战斗：意图+AP 行（仅启用 Beat 战斗的工程由 JS 显示） -->
+            <div id="beat-bar" style="display:none;">
+                <div id="beat-intent" class="log-system" style="margin:0.2rem 0;"></div>
+                <div id="beat-ap" style="font-size:0.8rem; color:#e8c66a; margin-bottom:0.3rem;"></div>
+            </div>
+            <!-- Beat 制五动作（仅启用 Beat 战斗的工程由 JS 显示） -->
+            <div class="combat-actions" id="beat-actions" style="display:none; flex-wrap:wrap;">
+                <button class="combat-btn" data-beat="attack">攻击 <small>(1AP)</small></button>
+                <button class="combat-btn flee" data-beat="block">格挡 <small>(0AP)</small></button>
+                <button class="combat-btn flee" data-beat="dodge">闪避 <small>(2AP)</small></button>
+                <button class="combat-btn flee" data-beat="charge">蓄力 <small>(0AP)</small></button>
+                <button class="combat-btn flee" data-beat="disengage">脱离 <small>(2AP)</small></button>
+            </div>
+            <!-- 战斗按钮（旧回合制：经典工程用，Beat 工程由 JS 隐藏） -->
+            <div class="combat-actions" id="classic-actions">
+                <button class="combat-btn" id="attack-btn">攻击！</button>
+                <div class="combat-items" id="combat-items"></div>
+            </div>
+        </div>
+
+        <!-- PROTOTYPE-GAME：战斗结算弹窗（胜利掉落点击拾取） -->
+        <div class="combat-panel" id="battle-result-panel" style="display:none;">
+            <h2 id="result-title" style="margin:0 0 0.4rem;">战斗胜利</h2>
+            <div id="result-gold" style="margin-bottom:0.5rem;"></div>
+            <div id="result-items-wrap">
+                <div class="section-title" style="margin:0.3rem 0;">战利品（点击拾取）</div>
+                <div id="result-items"></div>
+            </div>
+            <div style="margin-top:0.6rem;">
+                <button class="combat-btn" id="result-close-btn">结束战斗</button>
+            </div>
+        </div>
+
+        <!-- PROTOTYPE-GAME：道具介绍弹窗（拾取物品后告知那是什么） -->
+        <div class="combat-panel" id="item-popup-panel" style="display:none; max-width:380px;">
+            <h3 id="item-popup-name" style="margin:0 0 0.4rem;"></h3>
+            <p id="item-popup-desc" style="margin:0 0 0.6rem; line-height:1.6;"></p>
+            <button class="combat-btn" id="item-popup-close-btn">收下了</button>
+        </div>
+
+    </main>
+
+    <!-- 底部状态栏：左侧状态记录，右侧功能按钮 -->
+    <footer id="status-bar">
+        <div class="status-left">
+            <span id="status-scene">—</span>
+            <span id="status-time"></span>
+            <span id="status-gold"></span>
+        </div>
+        <div class="status-right">
+            <button id="toggle-inventory-btn" class="status-btn">背包</button>
+            <button id="toggle-save-btn" class="status-btn" style="display:none;">存档</button>
+            <button id="btn-console" class="status-btn">控制台</button>
+            <button id="btn-menu" class="status-btn">菜单</button>
+            <button id="logout-btn" class="status-btn" style="display:none;">退出</button>
+        </div>
+    </footer>
+
+    <!-- ========== 开发者控制台（默认隐藏） ========== -->
+    <div id="dev-console">
+        <div id="console-header">
+            <h3>开发者控制台</h3>
+            <button id="close-console" title="关闭控制台">✕</button>
+        </div>
+        <div id="console-log">
+            <div class="engine-output">欢迎来到开发者控制台！可用命令：</div>
+            <div class="engine-output">  • teleport &lt;场景ID&gt;  传送到指定场景（tavern/forest/cave）</div>
+            <div class="engine-output">  • add_item &lt;物品ID&gt;  给背包添加物品（货币类物品折算金币）</div>
+            <div class="engine-output">  • buy [物品ID]     查看/购买当前场景商店的货物</div>
+            <div class="engine-output">  • save              保存快照到 game_data/snapshot.json</div>
+            <div class="engine-output">  • load              读取快照</div>
+            <div class="engine-output">  • reset             重置游戏</div>
+        </div>
+        <div id="console-input-area">
+            <input type="text" id="console-input" placeholder="输入命令后回车..." autocomplete="off">
+            <button id="console-send">发送</button>
+        </div>
+    </div>
+
+    <!-- ========== 前端逻辑（拆分后：外部 JS 模块，按依赖顺序加载） ========== -->
+    <script src="js/constants.js"></script>
+    <script src="js/core.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

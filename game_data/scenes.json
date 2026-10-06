@@ -1,0 +1,52 @@
+{
+  "village": {
+    "id": "village",
+    "name": "村口",
+    "description": "清晨的村口很安静，老守卫拄着长矛站在木栅旁，身后货架上摆着几瓶治疗药水。北边的小路通向阴森的森林。",
+    "exits": [
+      "forest"
+    ],
+    "items_here": [],
+    "locked_exits": {},
+    "enemies_here": [],
+    "shop_items": [
+      {
+        "item_id": "healing_potion",
+        "price": 5
+      }
+    ]
+  },
+  "forest": {
+    "id": "forest",
+    "name": "森林小径",
+    "description": "林间小路泥泞湿滑，树影里有什么东西在蠕动——一只绿色史莱姆挡住了去路。它身后的山壁上，是一扇紧锁的石门。",
+    "exits": [
+      "village",
+      "cave"
+    ],
+    "items_here": [],
+    "locked_exits": {
+      "cave": true
+    },
+    "enemies_here": [
+      "slime"
+    ],
+    "shop_items": []
+  },
+  "cave": {
+    "id": "cave",
+    "name": "洞穴深处",
+    "description": "石门在身后缓缓合拢。洞穴尽头的石台上放着那枚闪闪发亮的金币——一尊石之守卫正挡在石台前，胸口的核晶随着你的靠近亮了起来。",
+    "exits": [
+      "forest"
+    ],
+    "items_here": [
+      "gold_coin"
+    ],
+    "locked_exits": {},
+    "enemies_here": [
+      "stone_guard"
+    ],
+    "shop_items": []
+  }
+}
