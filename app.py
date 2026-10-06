@@ -27,6 +27,88 @@ app.secret_key = os.environ.get('SECRET_KEY') or 'text-game-engine-dev-secret-ke
 # 【安全】生产环境强制 debug=False，只有显式设 FLASK_DEBUG=true 才开
 DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 
+# ---------- 通用互动故事预览运行时（与旧游戏会话完全隔离） ----------
+STORY_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates", "interactive_story")
+STORY_SESSIONS = {}
+
+
+def _story_runtime():
+    """按浏览器 session 创建独立互动故事状态。"""
+    sid = session.get("story_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["story_sid"] = sid
+    runtime = STORY_SESSIONS.get(sid)
+    if runtime is None:
+        runtime = InteractiveStoryRuntime.from_directory(STORY_TEMPLATE_DIR)
+        STORY_SESSIONS[sid] = runtime
+    return runtime
+
+
+def _story_payload(runtime):
+    page = runtime.current_page()
+    return {
+        "title": runtime.definition.title,
+        "description": runtime.definition.config.get("description", ""),
+        "page_id": runtime.state.get("current_page"),
+        "page": page,
+        "state": runtime.state.export(),
+    }
+
+
+def _read_story_editor_data():
+    """读取互动故事编辑器需要的配置和页面数据。"""
+    with open(os.path.join(STORY_TEMPLATE_DIR, "app.json"), encoding="utf-8") as handle:
+        config = json.load(handle)
+    with open(os.path.join(STORY_TEMPLATE_DIR, "pages.json"), encoding="utf-8") as handle:
+        pages = json.load(handle)
+    return config, pages
+
+
+def _validate_story_editor_data(config, pages):
+    """使用运行时校验编辑器提交的数据，并检查基本编辑字段。"""
+    if not isinstance(config, dict) or not isinstance(pages, dict):
+        raise ValueError("config 和 pages 必须是对象")
+    if not str(config.get("title", "")).strip():
+        raise ValueError("故事标题不能为空")
+    for page_id, page in pages.items():
+        if not isinstance(page_id, str) or not page_id.strip():
+            raise ValueError("页面 ID 不能为空")
+        if not isinstance(page, dict) or not str(page.get("title", "")).strip():
+            raise ValueError(f"页面 {page_id} 的标题不能为空")
+        for choice in page.get("choices", []):
+            if not isinstance(choice, dict) or not str(choice.get("text", "")).strip():
+                raise ValueError(f"页面 {page_id} 存在空选项")
+            condition = choice.get("if")
+            if condition:
+                if not isinstance(condition, dict) or not condition.get("path"):
+                    raise ValueError(f"页面 {page_id} 的条件格式无效")
+                if condition.get("operator", "equals") not in {
+                    "equals", "not_equals", "greater_than", "greater_or_equal",
+                    "less_than", "less_or_equal", "truthy", "falsy",
+                }:
+                    raise ValueError(f"页面 {page_id} 的条件运算符无效")
+            for action in choice.get("actions", []):
+                if action.get("type") not in {"set_variable", "modify_variable"}:
+                    raise ValueError(f"页面 {page_id} 的动作类型不支持")
+                if not action.get("path"):
+                    raise ValueError(f"页面 {page_id} 的动作路径不能为空")
+                if action.get("type") == "modify_variable" and not isinstance(action.get("amount"), (int, float)):
+                    raise ValueError(f"页面 {page_id} 的修改量必须是数字")
+    definition = InteractiveStoryRuntime.from_directory(STORY_TEMPLATE_DIR).definition
+    definition.config.update(config)
+    InteractiveStoryRuntime(definition, pages).validate()
+
+
+def _atomic_story_write(filename, payload):
+    """先写临时文件，再替换模板文件，避免留下半截 JSON。"""
+    target = os.path.join(STORY_TEMPLATE_DIR, filename)
+    temp = target + ".tmp"
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    os.replace(temp, target)
+
 # ---------- 加载游戏数据（全局只读，所有玩家共享） ----------
 def _derive_character_views(data: dict) -> None:
     """从 characters.json 派生 enemies / npcs 两个只读视图（原地替换内容）。
@@ -170,6 +252,70 @@ def _maybe_autosave(e: dict) -> None:
 # ============================================================
 # Flask 路由层 —— 每个路由都先拿 engines dict 再分发
 # ============================================================
+@app.route('/story')
+def serve_story():
+    return redirect('/static/story.html')
+
+
+@app.route('/story/editor')
+def serve_story_editor():
+    return redirect('/static/story-editor.html')
+
+
+@app.route('/api/story/editor/data', methods=['GET'])
+def story_editor_data():
+    try:
+        config, pages = _read_story_editor_data()
+    except (OSError, json.JSONDecodeError) as exc:
+        return jsonify({"success": False, "message": f"读取故事模板失败：{exc}"}), 500
+    return jsonify({"success": True, "config": config, "pages": pages})
+
+
+@app.route('/api/story/editor/save', methods=['POST'])
+def story_editor_save():
+    payload = request.get_json(silent=True) or {}
+    config = payload.get("config")
+    pages = payload.get("pages")
+    try:
+        _validate_story_editor_data(config, pages)
+        _atomic_story_write("app.json", config)
+        _atomic_story_write("pages.json", pages)
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    STORY_SESSIONS.clear()
+    return jsonify({"success": True, "message": "互动故事已保存"})
+
+
+@app.route('/api/story/state', methods=['GET'])
+def story_state():
+    return jsonify({"success": True, **_story_payload(_story_runtime())})
+
+
+@app.route('/api/story/reset', methods=['POST'])
+def story_reset():
+    sid = session.get("story_sid")
+    if sid:
+        STORY_SESSIONS.pop(sid, None)
+    runtime = _story_runtime()
+    return jsonify({"success": True, **_story_payload(runtime)})
+
+
+@app.route('/api/story/choose', methods=['POST'])
+def story_choose():
+    payload = request.get_json(silent=True) or {}
+    index = payload.get("index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return jsonify({"success": False, "message": "index 必须是整数"}), 400
+    try:
+        runtime = _story_runtime()
+        runtime.choose(index)
+    except IndexError:
+        return jsonify({"success": False, "message": "无效的故事选项"}), 400
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, **_story_payload(runtime)})
+
+
 @app.route('/')
 def serve_index():
     # 前端已拆分为 index.html + styles.css + js/*，静态资源统一挂在 /static/ 下。

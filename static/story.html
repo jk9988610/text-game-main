@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>互动故事</title>
+  <link rel="stylesheet" href="story.css">
+</head>
+<body>
+  <main class="story-shell" aria-live="polite">
+    <header class="story-header">
+      <a class="back-link" href="/">返回游戏</a>
+      <div>
+        <p class="eyebrow">INTERACTIVE STORY</p>
+        <h1 id="story-title">正在加载</h1>
+        <p id="story-description" class="description"></p>
+      </div>
+      <button id="restart" class="restart" type="button">重新开始</button>
+    </header>
+
+    <article class="story-panel">
+      <p id="page-kicker" class="page-kicker"></p>
+      <h2 id="page-title"></h2>
+      <p id="page-text" class="page-text"></p>
+      <div id="choices" class="choices" role="group" aria-label="故事选择"></div>
+      <p id="story-error" class="error" role="alert" hidden></p>
+    </article>
+
+    <footer class="story-footer">
+      <span id="state-summary"></span>
+      <a href="/static/editor.html">打开编辑器</a>
+    </footer>
+  </main>
+  <script src="story.js"></script>
+</body>
+</html>

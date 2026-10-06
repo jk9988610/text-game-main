@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from .action_registry import ActionContext, ActionRegistry
+from .condition_evaluator import ConditionEvaluator
 from .runtime_definition import RuntimeDefinition
 from .runtime_state import RuntimeState
 
@@ -51,7 +52,14 @@ class InteractiveStoryRuntime:
 
     def current_page(self) -> Dict[str, Any]:
         page_id = self.state.get("current_page")
-        return dict(self.pages[page_id])
+        if page_id is None:
+            return {}
+        page = dict(self.pages[page_id])
+        page["choices"] = [
+            choice for choice in page.get("choices", [])
+            if ConditionEvaluator(self.state).matches(choice.get("if"))
+        ]
+        return page
 
     def choose(self, index: int) -> Dict[str, Any]:
         page = self.current_page()

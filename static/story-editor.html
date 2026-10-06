@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>互动故事编辑器</title>
+  <link rel="stylesheet" href="story-editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><a href="/story">预览</a><span class="crumb">/</span><strong>互动故事编辑器</strong></div>
+    <div class="toolbar"><button id="add-page">+ 新页面</button><button id="save" class="primary">保存故事</button></div>
+  </header>
+  <main class="editor-shell">
+    <aside class="page-list-panel">
+      <div class="panel-heading"><h1>页面</h1><span id="page-count"></span></div>
+      <div id="page-list" class="page-list"></div>
+    </aside>
+    <section class="form-panel">
+      <div class="panel-heading"><h1>故事设置</h1></div>
+      <label>标题<input id="story-title" type="text"></label>
+      <label>简介<textarea id="story-description" rows="3"></textarea></label>
+      <label>初始页面<select id="initial-page"></select></label>
+      <hr>
+      <div class="panel-heading"><h1>当前页面</h1><button id="delete-page" class="danger">删除</button></div>
+      <label>页面 ID<input id="page-id" type="text" readonly></label>
+      <label>页面标题<input id="page-title" type="text"></label>
+      <label>正文<textarea id="page-text" rows="8"></textarea></label>
+    </section>
+    <section class="choices-panel">
+      <div class="panel-heading"><h1>选项</h1><button id="add-choice">+ 添加</button></div>
+      <div id="choices"></div>
+      <p id="empty-choices" class="muted">暂无选项。终点页面可以保持为空。</p>
+    </section>
+  </main>
+  <div id="notice" class="notice" role="status"></div>
+  <script src="story-editor.js"></script>
+</body>
+</html>

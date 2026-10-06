@@ -1,19 +1,19 @@
 {
   "app_id": "first_branch",
   "app_type": "interactive_story",
-  "title": "岔路口",
   "description": "一个由页面、选择和变量组成的互动故事。",
-  "initial_page": "start",
-  "state": {
-    "variables": {
-      "trust": 0
-    },
-    "records": {}
-  },
   "features": [
     "navigation",
     "variables",
     "rules",
     "save"
-  ]
+  ],
+  "initial_page": "start",
+  "state": {
+    "records": {},
+    "variables": {
+      "trust": 0
+    }
+  },
+  "title": "岔路口"
 }

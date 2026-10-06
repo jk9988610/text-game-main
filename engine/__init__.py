@@ -16,6 +16,7 @@ from . import beat_combat
 from .runtime import (
     ActionContext,
     ActionRegistry,
+    ConditionEvaluator,
     InteractiveStoryRuntime,
     RuntimeDefinition,
     RuntimeState,
@@ -36,6 +37,7 @@ __all__ = [
     "beat_combat",
     "ActionContext",
     "ActionRegistry",
+    "ConditionEvaluator",
     "InteractiveStoryRuntime",
     "RuntimeDefinition",
     "RuntimeState",
