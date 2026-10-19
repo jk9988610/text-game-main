@@ -100,12 +100,17 @@ def _task_payload(runtime):
 
 
 def _story_runtime():
-    """按浏览器 session 创建独立互动故事状态。"""
+    """按浏览器 session 创建独立互动故事状态（不依赖平台会话管理器）。"""
     sid = session.get("story_sid")
     if not sid:
         sid = uuid.uuid4().hex
         session["story_sid"] = sid
-    return APP_SESSION_MANAGER.get_or_create("first_branch", sid)
+    runtime = STORY_SESSIONS.get(sid)
+    if runtime is None:
+        runtime = InteractiveStoryRuntime.from_directory(STORY_TEMPLATE_DIR)
+        STORY_SESSIONS[sid] = runtime
+    return runtime
+
 
 
 def _story_payload(runtime):
