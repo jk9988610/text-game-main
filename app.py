@@ -328,8 +328,9 @@ def story_state():
 def story_reset():
     sid = session.get("story_sid")
     if sid:
-        APP_SESSION_MANAGER.reset("first_branch", sid)
+        STORY_SESSIONS.pop(sid, None)
     runtime = _story_runtime()
+
     return jsonify({"success": True, **_story_payload(runtime)})
 
 
