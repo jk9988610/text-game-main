@@ -1,6 +1,6 @@
 # TextGameEngine 通用交互内容引擎
 
-Flask + 原生 HTML/CSS/JS（零前端框架、零构建步骤）的数据驱动交互内容引擎。当前包含点击式文字游戏运行时和互动故事预览，后续可扩展到办公流程、自定义工具和其他网页内容。
+Flask + 原生 HTML/CSS/JS（零前端框架、零构建步骤）的数据驱动交互内容引擎。当前包含点击式文字游戏运行时和互动故事预览。
 引擎逻辑与游戏数据严格分离：场景、物品、角色（敌人 / 可对话人物）、标签全部是 JSON，既能手改，也能用内置的可视化编辑器制作。
 
 - 单机离线游玩：多槽存档 + 自动存档，存本地 SQLite
@@ -18,12 +18,6 @@ Flask + 原生 HTML/CSS/JS（零前端框架、零构建步骤）的数据驱动
 #   互动故事： http://127.0.0.1:5000/story
 #   故事编辑器： http://127.0.0.1:5000/story/editor
 #   故事存档 API： POST /api/story/save、POST /api/story/load
-#   任务流程： http://127.0.0.1:5000/task
-#   任务编辑器： http://127.0.0.1:5000/task/editor
-#   表单流程： http://127.0.0.1:5000/form
-#   应用中心： http://127.0.0.1:5000/apps
-#   应用目录 API： http://127.0.0.1:5000/api/apps
-#   通用应用入口： http://127.0.0.1:5000/apps/<app_id>
 ```
 
 游戏内开发者控制台：底栏「控制台」按钮或按 `~`。常用命令：
@@ -36,7 +30,7 @@ Flask + 原生 HTML/CSS/JS（零前端框架、零构建步骤）的数据驱动
 ```
 app.py                  # Flask 路由层：只做编排，不含游戏规则
 engine/                 # 引擎（与具体应用内容无关）
-  runtime/              # 通用应用运行时基础组件（状态/动作/应用定义）
+  runtime/              # 流程运行时（FlowRuntime / InteractiveStoryRuntime）
   session_manager.py    # 现有游戏会话适配层（兼容旧游戏，不再扩展通用职责）
   scene_manager.py      # 场景/出口/锁
   item_system.py        # 背包、拾取、货币折算、消耗品
@@ -188,6 +182,7 @@ M12 角色合并（敌人 + NPC 合并为 `characters.json`：`enemy` / `talkabl
 运行时派生 `enemies` / `npcs` 只读视图，编辑器合并为「角色」页签）→
 M13 事件字典（P2 槽位开放：触发器/条件/效果的可选条目移到 `events.json` 词汇表，
 引擎只留原子；编辑器表单全部按字典动态渲染，条目可自定义并热更新）。
+M14 收敛回游戏引擎（移除 2026-10-06 后漂移期引入的平台模块：组织/角色管理、应用注册、表单/任务运行时、通用应用存档与工作台；故事线改回独立会话管理）。
 后续规划：战斗深化（技能/多敌人/经验）、限量商店、任务日志 UI、场景→角色/地图钻取。
 
 ---
@@ -285,32 +280,10 @@ M13 事件字典（P2 槽位开放：触发器/条件/效果的可选条目移�
 Nginx 反代，systemd 管理；`SECRET_KEY` 环境变量注入；`ONLINE_MODE=online` 时编辑器写接口全部 403。
 文件见 `deploy/`。注意在线模式既已屏蔽，重新部署前应确认开放范围。
 
-### 通用运行时示例
+### 流程运行时
 
 `engine/runtime/flow_runtime.py` 提供与领域无关的节点流程运行时：节点、转移、条件、动作和状态均由数据描述。
-互动故事通过 `InteractiveStoryRuntime` 适配；任务流程示例位于 `templates/task_flow/`，通过 `TaskFlowRuntime` 复用同一内核。
+互动故事通过 `InteractiveStoryRuntime` 适配，会话由 `app.py` 的 `STORY_SESSIONS` 管理，存档走 `/api/story/save|load`。
 
-当前通用动作包括：
-
-- `set_variable`：设置嵌套状态变量
-- `modify_variable`：修改数值变量
-- `append_record`：向记录列表追加内容
-- `show_message`：产生运行时消息结果
-
-故事编辑器与任务编辑器共用 `static/js/flow-editor-core.js`，统一处理节点 ID、引用清理、标量解析和 JSON 请求错误。领域编辑器只保留各自的数据字段和界面。表单流程模板位于 `templates/form_flow/`，通过 `FormFlowRuntime` 复用 `FlowRuntime`，包含字段校验、提交记录和审批状态转移。应用注册中心 `AppRegistry` 会扫描 `templates/*/app.json`，自动生成应用目录。当前发现 `first_branch`（互动故事）、`task_flow_demo`（任务流程）和 `request_form_demo`（表单流程）。新增模板时只需提供合法的 `app_id`/`app_type` 清单，并在运行时工厂中登记对应适配器。应用会话统一由 `ApplicationSessionManager` 管理，提供通用接口：
-
-- `GET /api/apps/<app_id>/state`
-- `POST /api/apps/<app_id>/reset`
-- `POST /api/apps/<app_id>/transition`
-- `POST /api/apps/<app_id>/submit`（表单应用）
-
-原有 `/api/story/*`、`/api/task/*`、`/api/form/*` 接口继续保留，作为兼容层。统一应用存档 API：
-
-- `GET /api/apps/<app_id>/saves`
-- `POST /api/apps/<app_id>/save`
-- `POST /api/apps/<app_id>/load`
-- `POST /api/apps/<app_id>/delete-save`
-
-存档包含 `schema_version`、`app_id`、`app_type` 和运行时状态；故事、任务、表单的统一转移和表单提交会自动写入 `auto` 槽位。三个应用页面共用 `static/js/app-save-panel.js` 存档面板，支持手动保存、读取、删除、槽位刷新和启动时继续/重新开始。应用运行时发生统一转移或表单提交后，会自动保存到 `auto` 槽位。
-运行时适配器统一实现 `ApplicationRuntime` 协议：提供 `payload()`、`transition()` 和 `validate_state()`。故事保留 `choose()`，任务保留 `advance()`，表单保留 `submit_form()` 作为领域兼容接口；会话和存档管理不再依赖具体运行时类型。统一应用存档现在包含 `revision` 和 `updated_at`。保存时可以提交 `expected_revision`，版本不一致会返回 HTTP 409，避免旧标签页覆盖新状态。会话首次创建时会尝试从内部 `current` 状态恢复，统一转移和表单提交会同步更新当前状态。应用角色权限：`applicant` 可提交表单，`handler` 可接手/推进任务，`approver` 可执行审批，`admin` 可编辑模板和管理角色。登录用户默认获得 `applicant`；设置环境变量 `ADMIN_USERNAME` 后，匹配用户名会获得管理员角色。匿名用户仍保留演示身份，可访问现有示例流程。角色接口为 `GET /api/auth/roles`，管理员可通过 `POST/DELETE /api/auth/roles/<user_id>` 分配或撤销角色。应用中心、故事、任务、表单和两个编辑器共用 `static/js/auth-panel.js`。页面会显示当前账号和角色，并提供登录、注册、退出；编辑器保存按钮会根据管理员角色禁用，后端权限校验仍是最终防线。多人协作流程实例存储在 `game_data/process_instances.db`，记录 `app_id`、`status`、`applicant_id`、`handler_id`、`approver_id` 以及创建/更新时间。统一接口：`GET/POST /api/apps/<app_id>/process` 查询或创建实例，`POST /api/apps/<app_id>/process/assign` 由管理员分配参与人。表单提交会绑定申请人，任务推进绑定处理人，审批动作绑定审批人；任务和表单页面会显示当前实例状态及参与人。统一工作台：`http://127.0.0.1:5000/workbench`。接口 `GET /api/workbench` 按当前账号返回我提交的申请、分配给我的任务、等待我审批和已完成流程；匿名演示用户只看到当前浏览器会话实例。工作台卡片可直接进入对应的故事、任务或表单应用。前端 API 请求会检测非 JSON 响应并给出具体接口和 HTTP 状态。修改 Flask 路由后需重启服务，并使用浏览器硬刷新，避免旧进程或缓存脚本继续请求不存在的路由。组织级身份模型已加入：用户创建组织后自动成为该组织的 `admin`，加入组织的成员默认获得 `applicant` 标签。组织管理员可为成员分配 `handler`、`approver`、`admin` 等标签；当前组织标签优先于旧的全局角色。组织接口包括 `GET/POST /api/organizations`、`POST /api/organizations/join`、`POST /api/organizations/select` 和 `POST /api/organizations/<organization_id>/members/<user_id>/labels`。
-界面交互约定：登录、注册、组织创建、加入组织、切换组织和邀请码都通过页面上的“账号 / 组织”按钮打开弹窗，关闭后不占用主流程页面。任务页面的“新建任务”会创建流程实例；实例创建后，必须先在任务编辑器中为当前节点配置至少一个转移，任务才有可推进的下一步。若节点没有转移，页面会明确显示“流程尚未配置下一步转移”。
+故事编辑器使用 `static/js/flow-editor-core.js` 统一处理节点 ID、引用清理、标量解析和 JSON 请求错误。
+账号与角色面板为 `static/js/auth-panel.js`，编辑器保存按钮根据管理员角色禁用，后端权限校验是最终防线。
