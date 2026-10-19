@@ -12,7 +12,8 @@
     "shop_items": [
       {
         "item_id": "healing_potion",
-        "price": 5
+        "price": 5,
+        "stock": 3
       }
     ]
   },
