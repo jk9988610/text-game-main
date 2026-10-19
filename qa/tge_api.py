@@ -282,7 +282,7 @@ def editor_snapshot(c: GameClient) -> dict:
     d = c.editor_data()
     return {k: copy.deepcopy(d.get(k)) for k in
             ("tags", "scenes", "items", "characters", "config",
-             "layouts", "editor_settings")}
+             "layouts", "scene_layouts", "editor_settings")}
 
 
 def editor_restore(c: GameClient, snap: dict) -> None:
@@ -346,6 +346,19 @@ def editor_restore(c: GameClient, snap: dict) -> None:
     for npc_id in c.layout_all():
         if npc_id not in snap_layouts:
             c.layout_save(npc_id, {})
+
+    # 3.5) scene_layouts 还原（M9 用，独立通道）
+    snap_scene_layouts = snap.get("scene_layouts") or {}
+    for scene_id, pos in snap_scene_layouts.items():
+        c.scene_layout_save(scene_id, pos)
+    live_scene_layouts = c.editor_data().get("scene_layouts") or {}
+    for scene_id in live_scene_layouts:
+        if scene_id not in snap_scene_layouts:
+            c.scene_layout_save(scene_id, {})
+
+    # 4) editor_settings 还原（M10 用，之前只拍不还）
+    if "editor_settings" in snap and snap["editor_settings"] is not None:
+        c.editor_settings_save(snap["editor_settings"])
 
     # 4) 编辑器偏好还原（独立文件，直接整体写回即可）
     if snap.get("editor_settings") is not None:
