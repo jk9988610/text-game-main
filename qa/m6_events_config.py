@@ -21,9 +21,9 @@ RULES = [
                {"type": "gold", "amount": 2}],
     },
     {
-        "id": "qa_kill_goblin", "label": "QA击杀哥布林给药水",
+        "id": "qa_kill_slime", "label": "QA击杀史莱姆给药水",
         "on": "ENEMY_KILLED",
-        "if": {"enemy_id": "cave_goblin"},
+        "if": {"enemy_id": "slime"},
         "do": [{"type": "give_item", "item": "healing_potion"}],
     },
     {
@@ -42,7 +42,7 @@ RULES = [
     {
         "id": "qa_sprite_secret", "label": "QA听到森林秘密",
         "on": "NPC_TALK",
-        "if": {"npc_id": "npc_2_sprite", "node_id": "secret"},
+        "if": {"npc_id": "qa_sprite", "node_id": "secret"},
         "do": [{"type": "set_flag", "flag": "qa_secret"}],
     },
     {
@@ -58,11 +58,40 @@ def run(r: QaRunner) -> None:
     c = GameClient("qa_m6")
     snap = editor_snapshot(c)
     try:
+        # 自建测试数据（M6 依赖：rusty_key / star_city / potion_store / qa_sprite）
+        c.editor_save("item", {
+            "id": "rusty_key", "name": "测试钥匙",
+            "description": "M6 测试用。", "tags": [],
+        })
+        c.editor_save("scene", {
+            "id": "star_city", "name": "星之城", "description": "M6 测试用。",
+            "exits": {}, "items_here": [], "enemies_here": [],
+        })
+        c.editor_save("scene", {
+            "id": "potion_store", "name": "药水店", "description": "M6 测试用。",
+            "exits": {}, "items_here": [], "enemies_here": [],
+            "shop_items": [{"item_id": "healing_potion", "price": 5}],
+        })
+        c.editor_save("character", {
+            "id": "qa_sprite", "name": "QA精灵", "description": "M6 测试用。",
+            "scene_id": "forest", "greeting": "greet", "greeting_rules": [],
+            "tags": ["talkable"],
+            "nodes": {
+                "greet": {"text": "你好", "choices": [
+                    {"text": "问秘密", "next": "secret"},
+                    {"text": "再见", "next": None},
+                ]},
+                "secret": {"text": "秘密", "choices": []},
+            },
+        })
+        _forest = c.editor_data()["scenes"]["forest"]
+        _forest["items_here"] = _forest.get("items_here", []) + ["rusty_key"]
+        c.editor_save("scene", _forest)
         # ---------- G1 游戏信息接口 ----------
         r.section("G1 /api/game-info")
         info = c.game_info()
-        r.check("default-title", info.get("title") == "酒馆奇遇", info)
-        r.check("default-intro", "文字冒险" in info.get("intro", ""), info)
+        r.check("default-title", info.get("title") == "森林试炼", info)
+        r.check("default-intro", "森林" in info.get("intro", "") or "老守卫" in info.get("intro", ""), info)
 
         # ---------- 先建全部测试规则（此时 qa_m6 会话尚未创建） ----------
         r.section("R0 测试规则落盘")
@@ -77,17 +106,18 @@ def run(r: QaRunner) -> None:
         r.section("R6a NPC_TALK 触发器")
         c.reset()
         c.teleport("forest")
-        c.dialogue_start("npc_2_sprite")
+        c.dialogue_start("qa_sprite")
         dl = c.dialogue()
-        r.check("sprite-greet-default", dl["node_id"] == "greet"
-                and len(dl["choices"]) == 2, dl.get("choices"))
-        c.dialogue_choose(0)  # 询问秘密 → secret 节点，触发 NPC_TALK
+        r.check("sprite-greet-default", dl.get("node_id") == "greet"
+                and len(dl.get("choices", [])) == 2, dl.get("choices"))
+        c.dialogue_choose(0)  # 问秘密 → secret 节点，触发 NPC_TALK
         r.check("secret-flag-set",
                 c.state().get("flags", {}).get("qa_secret") is True,
                 c.state().get("flags"))
 
         # ---------- R1 ITEM_TAKEN 触发器（控制台发放不触发，场景拾取才触发） ----------
         r.section("R1 ITEM_TAKEN 触发器")
+        gold_before_key = c.state().get("player_gold", 0)
         c.give("rusty_key")  # from_scene=__console__，规则不应命中
         r.check("console-give-no-trigger",
                 not c.state().get("flags", {}).get("qa_key_flag"),
@@ -96,38 +126,47 @@ def run(r: QaRunner) -> None:
         flags = c.state().get("flags", {})
         r.check("take-key-success", take.get("success") is True, take)
         r.check("take-key-flag", flags.get("qa_key_flag") is True, flags)
-        r.check("take-key-gold-2", c.state().get("player_gold") == 2)
+        r.check("take-key-gold-2",
+                c.state().get("player_gold") == gold_before_key + 2,
+                {"before": gold_before_key, "after": c.state().get("player_gold")})
 
-        # ---------- R5 unlock 回归（原钥匙规则，捡钥匙后森林→洞穴锁已开） ----------
-        r.section("R5 unlock 效果回归")
-        move = c.move("cave")
-        r.check("move-to-cave-unlocked", move.get("success") is True, move)
+        # ---------- R5 锁逻辑：杀 slime 前 cave 锁定 ----------
+        r.section("R5 cave 锁逻辑")
+        blocked = c.move("cave")
+        r.check("move-to-cave-blocked-before-kill", blocked.get("success") is False, blocked)
 
         # ---------- R3 SCENE_ENTER 触发器 ----------
         r.section("R3 SCENE_ENTER 触发器")
+        c.teleport("cave")
         r.check("cave-enter-flag",
                 c.state().get("flags", {}).get("qa_cave_flag") is True,
                 c.state().get("flags"))
 
         # ---------- R2 ENEMY_KILLED 触发器 ----------
         r.section("R2 ENEMY_KILLED 触发器")
-        c.combat_start("cave_goblin")
-        last = c.attack_until("cave_goblin")
-        r.check("goblin-killed", last.get("defeated") == "cave_goblin", last)
+        c.teleport("forest")
+        c.combat_start("slime")
+        last = c.attack_until("slime")
+        r.check("slime-killed", last.get("defeated") == "slime", last)
         r.check("kill-gives-potion",
                 inventory_ids(c.state()).count("healing_potion") == 1,
                 inventory_ids(c.state()))
+        move = c.move("cave")
+        r.check("move-to-cave-unlocked-after-kill", move.get("success") is True, move)
 
         # ---------- R4 when 世界条件 ----------
         r.section("R4 规则的 when 条件")
+        gold_before_star = c.state().get("player_gold", 0)
         c.teleport("star_city")  # 无 qa_star_ok → 不加金币
         r.check("star-no-gold-without-flag",
-                c.state().get("player_gold") == 2, c.state().get("player_gold"))
+                c.state().get("player_gold") == gold_before_star,
+                {"before": gold_before_star, "after": c.state().get("player_gold")})
         c.set_flag("qa_star_ok")
         c.teleport("tavern")
         c.teleport("star_city")  # 再进 → 条件满足 +5
         r.check("star-gold-with-flag",
-                c.state().get("player_gold") == 7, c.state().get("player_gold"))
+                c.state().get("player_gold") == gold_before_star + 5,
+                {"before": gold_before_star, "after": c.state().get("player_gold")})
 
         # ---------- R6b ITEM_BOUGHT 触发器 ----------
         r.section("R6b ITEM_BOUGHT 触发器")
@@ -191,7 +230,7 @@ def run(r: QaRunner) -> None:
             "game_title": "QA测试游戏",
             "game_intro": "QA 用简介",
             "initial_scene": "potion_store",
-            "initial_inventory": ["rusty_sword", "healing_potion"],
+            "initial_inventory": ["iron_sword", "healing_potion"],
             "initial_gold": 7,
             "player": {"hp": 42, "attack": 9, "defense": 1},
         })
@@ -204,7 +243,7 @@ def run(r: QaRunner) -> None:
                 st["scene"]["id"])
         r.check("initial-gold-applied", st.get("player_gold") == 7)
         r.check("initial-inventory-applied",
-                inventory_ids(st) == ["rusty_sword", "healing_potion"],
+                inventory_ids(st) == ["iron_sword", "healing_potion"],
                 inventory_ids(st))
         cb = c.combat()
         r.check("player-stats-applied",
