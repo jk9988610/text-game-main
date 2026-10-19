@@ -314,6 +314,12 @@ def editor_restore(c: GameClient, snap: dict) -> None:
 
     # 2) 删除测试新增实体：先删场景（测试场景可能互相引用出口，重试几轮），
     #    再删角色（可能还被上面某个测试场景的 enemies_here 引用），最后删物品
+    #    删场景前让主 client 回初始场景，避免"有玩家正在这个场景里"的拦截
+    try:
+        c.reset()
+    except Exception:
+        pass
+    failed_reasons = {}
     for _ in range(3):
         live_scenes = c.editor_data()["scenes"]
         extras = [sid for sid in live_scenes if sid not in snap["scenes"]]
@@ -322,9 +328,17 @@ def editor_restore(c: GameClient, snap: dict) -> None:
         progress = False
         for sid in extras:
             r = c.editor_delete("scene", sid)
-            progress = progress or r.get("success", False)
+            if r.get("success"):
+                progress = True
+                failed_reasons.pop(sid, None)
+            else:
+                failed_reasons[sid] = r.get("message", "unknown")
         if not progress:
             break
+    if failed_reasons:
+        print("[editor_restore] 以下场景未能删除（可能有其他 client 停在那里）：")
+        for sid, msg in failed_reasons.items():
+            print("  - %s: %s" % (sid, msg))
     live = c.editor_data()
     for cid in (live.get("characters") or {}):
         if cid not in (snap.get("characters") or {}):

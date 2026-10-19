@@ -563,12 +563,13 @@ class EditorManager:
             for k in ("game_title", "game_intro", "initial_scene",
                       "initial_inventory", "initial_gold"):
                 config[k] = cleaned[k]
-            # player 合并：payload 没传 skills 时保留原有 skills
+            # player 合并：payload 没传的字段保留原有值（skills/level/exp）
             new_player = dict(cleaned["player"])
-            if "skills" not in (payload.get("player") or {}):
-                existing_skills = (config.get("player") or {}).get("skills")
-                if existing_skills:
-                    new_player["skills"] = existing_skills
+            old_player = config.get("player") or {}
+            raw_player = payload.get("player") or {}
+            for key in ("skills", "level", "exp"):
+                if key not in raw_player and key in old_player:
+                    new_player[key] = old_player[key]
             config["player"] = new_player
             self._write_json("config", config)
             return {"success": True, "message": "游戏设置已保存（对新开游戏/重置生效）"}
@@ -759,6 +760,19 @@ class EditorManager:
                 errors.append("玩家技能必须是字符串列表")
             else:
                 player["skills"] = self._dedupe_strs(raw_skills)
+        # 等级/经验：可选，不传则不覆盖（upsert_config 里合并）
+        if "level" in raw_player:
+            lv = self._to_int(raw_player.get("level"), -1)
+            if lv < 1:
+                errors.append("玩家等级必须是正整数")
+            else:
+                player["level"] = lv
+        if "exp" in raw_player:
+            ex = self._to_int(raw_player.get("exp"), -1)
+            if ex < 0:
+                errors.append("玩家经验必须是非负整数")
+            else:
+                player["exp"] = ex
 
         if not title:
             errors.append("游戏标题不能为空")
@@ -1009,6 +1023,14 @@ class EditorManager:
             self._clean_beat_fields(cleaned, payload)
         if "talkable" in applied:
             self._clean_dialogue_fields(cleaned, payload)
+        # 保持原 dict 的 key 顺序（避免每次保存都产生字段顺序 diff）
+        original = characters.get(cid) or {}
+        if original:
+            ordered = {k: cleaned[k] for k in original if k in cleaned}
+            for k in cleaned:
+                if k not in ordered:
+                    ordered[k] = cleaned[k]
+            cleaned = ordered
         return cleaned, is_new, cid
 
     @staticmethod
@@ -1373,6 +1395,7 @@ class EditorManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
             os.replace(tmp_path, path)
         except Exception:
             if os.path.exists(tmp_path):

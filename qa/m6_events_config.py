@@ -213,6 +213,7 @@ def run(r: QaRunner) -> None:
         z1.teleport("star_city")
         r.check("new-rule-fires-new-session",
                 z1.state().get("flags", {}).get("qa_z") is True)
+        z1.reset()
         z1.cleanup_saves()
         r.check("z-rule-deleted", c.event_rule_delete("qa_z_star").get("success") is True)
         z2 = GameClient("qa_m6z2")
@@ -221,6 +222,7 @@ def run(r: QaRunner) -> None:
         r.check("deleted-rule-silent-new-session",
                 not z2.state().get("flags", {}).get("qa_z"),
                 z2.state().get("flags"))
+        z2.reset()
         z2.cleanup_saves()
 
         # ---------- G2 开局配置编辑 ----------
