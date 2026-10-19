@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="story-editor.css">
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar"><div id="auth-panel"></div>
     <div><a href="/story">预览</a><span class="crumb">/</span><strong>互动故事编辑器</strong></div>
     <div class="toolbar"><button id="add-page">+ 新页面</button><button id="save" class="primary">保存故事</button></div>
   </header>
@@ -34,6 +34,8 @@
     </section>
   </main>
   <div id="notice" class="notice" role="status"></div>
+  <script src="js/auth-panel.js"></script>
+  <script src="js/flow-editor-core.js"></script>
   <script src="story-editor.js"></script>
 </body>
 </html>

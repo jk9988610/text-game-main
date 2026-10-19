@@ -1,0 +1,7 @@
+{
+  "fields": [
+    {"key": "applicant", "label": "申请人", "type": "text", "required": true},
+    {"key": "amount", "label": "申请金额", "type": "number", "required": true, "min": 1},
+    {"key": "reason", "label": "申请理由", "type": "textarea", "required": true}
+  ]
+}

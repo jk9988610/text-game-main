@@ -14,11 +14,21 @@ from engine import (
     SessionManager,
     SaveManager,
     AuthManager,
+    AppRegistry,
+    ApplicationSaveManager,
+    ApplicationSessionManager,
+    FormFlowRuntime,
+    RevisionConflictError,
     InteractiveStoryRuntime,
+    RuntimeDefinition,
+    TaskFlowRuntime,
+    OrganizationManager,
+    ProcessInstanceManager,
+    RoleManager,
     beat_combat,
+    VALID_ROLES,
 )
 from engine.editor_manager import EditorManager
-
 # ---------- Flask 初始化 ----------
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
@@ -30,6 +40,63 @@ DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 # ---------- 通用互动故事预览运行时（与旧游戏会话完全隔离） ----------
 STORY_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates", "interactive_story")
 STORY_SESSIONS = {}
+STORY_SAVE = SaveManager(db_path="game_data/story_saves.db", defaults={})
+
+# ---------- 任务流程模板（独立于游戏和故事会话） ----------
+TASK_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates", "task_flow")
+TASK_SESSIONS = {}
+
+# ---------- 表单流程模板（字段 + FlowRuntime） ----------
+FORM_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates", "form_flow")
+FORM_SESSIONS = {}
+
+# ---------- 应用注册中心：自动发现 templates/*/app.json ----------
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+APP_REGISTRY = AppRegistry(TEMPLATES_DIR)
+APP_SESSION_MANAGER = ApplicationSessionManager(APP_REGISTRY)
+APP_SAVE_MANAGER = ApplicationSaveManager(APP_REGISTRY, APP_SESSION_MANAGER)
+APP_SESSION_MANAGER.set_save_manager(APP_SAVE_MANAGER)
+ROLE_MANAGER = RoleManager()
+ORGANIZATION_MANAGER = OrganizationManager()
+PROCESS_MANAGER = ProcessInstanceManager()
+
+
+def _form_runtime():
+    sid = session.get("form_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["form_sid"] = sid
+    return APP_SESSION_MANAGER.get_or_create("request_form_demo", sid)
+
+
+def _form_payload(runtime):
+    return {
+        "title": runtime.definition.title,
+        "description": runtime.definition.config.get("description", ""),
+        "node_id": runtime.state.get("current_node"),
+        "node": runtime.current_node(),
+        "fields": runtime.fields,
+        "form": runtime.state.get("variables.form", {}),
+        "state": runtime.state.export(),
+    }
+
+
+def _task_runtime():
+    sid = session.get("task_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["task_sid"] = sid
+    return APP_SESSION_MANAGER.get_or_create("task_flow_demo", sid)
+
+
+def _task_payload(runtime):
+    return {
+        "title": runtime.definition.title,
+        "description": runtime.definition.config.get("description", ""),
+        "node_id": runtime.state.get("current_node"),
+        "node": runtime.current_task(),
+        "state": runtime.state.export(),
+    }
 
 
 def _story_runtime():
@@ -38,11 +105,7 @@ def _story_runtime():
     if not sid:
         sid = uuid.uuid4().hex
         session["story_sid"] = sid
-    runtime = STORY_SESSIONS.get(sid)
-    if runtime is None:
-        runtime = InteractiveStoryRuntime.from_directory(STORY_TEMPLATE_DIR)
-        STORY_SESSIONS[sid] = runtime
-    return runtime
+    return APP_SESSION_MANAGER.get_or_create("first_branch", sid)
 
 
 def _story_payload(runtime):
@@ -252,6 +315,448 @@ def _maybe_autosave(e: dict) -> None:
 # ============================================================
 # Flask 路由层 —— 每个路由都先拿 engines dict 再分发
 # ============================================================
+@app.route('/form')
+def serve_form():
+    return redirect('/static/form.html')
+
+
+@app.route('/api/form/state', methods=['GET'])
+def form_state():
+    return jsonify({"success": True, **_form_payload(_form_runtime())})
+
+
+@app.route('/api/form/submit', methods=['POST'])
+def form_submit():
+    denied = _require_capability("submit_form")
+    if denied:
+        return denied
+    runtime = _form_runtime()
+    errors = runtime.submit_form(request.get_json(silent=True) or {})
+    if errors:
+        return jsonify({"success": False, "errors": errors}), 400
+    return jsonify({"success": True, **_form_payload(runtime)})
+
+
+@app.route('/api/form/advance', methods=['POST'])
+def form_advance():
+    denied = _require_capability("approve")
+    if denied:
+        return denied
+    runtime = _form_runtime()
+    index = (request.get_json(silent=True) or {}).get("index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return jsonify({"success": False, "message": "index 必须是整数"}), 400
+    if runtime.state.get("current_node") == "draft" and not runtime.has_submitted_form():
+        return jsonify({"success": False, "message": "请先完整提交表单"}), 400
+    try:
+        runtime.advance(index)
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, **_form_payload(runtime)})
+
+
+@app.route('/api/form/reset', methods=['POST'])
+def form_reset():
+    sid = session.get("form_sid")
+    if sid:
+        APP_SESSION_MANAGER.reset("request_form_demo", sid)
+    return jsonify({"success": True, **_form_payload(_form_runtime())})
+
+
+@app.route('/apps')
+def app_hub():
+    return redirect('/static/apps.html')
+
+
+@app.route('/api/apps', methods=['GET'])
+def app_catalog():
+    return jsonify({"success": True, "apps": APP_REGISTRY.catalog()})
+
+
+@app.route('/apps/<app_id>')
+def generic_app_entry(app_id):
+    app_info = APP_REGISTRY.get(app_id)
+    if not app_info:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    page_by_type = {
+        "interactive_story": "/story",
+        "task_flow": "/task",
+        "form_flow": "/form",
+    }
+    target = page_by_type.get(app_info["app_type"])
+    if not target:
+        return jsonify({"success": False, "message": "应用类型没有运行页面"}), 400
+    return redirect(target)
+
+
+@app.route('/api/apps/<app_id>', methods=['GET'])
+def app_info(app_id):
+    app_info = APP_REGISTRY.get(app_id)
+    if not app_info:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    return jsonify({"success": True, "app": {
+        key: value for key, value in app_info.items()
+        if key not in {"directory", "config"}
+    }})
+
+
+def _current_user_context():
+    user_id = session.get("user_id")
+    if not user_id:
+        return {"user_id": None, "username": "演示用户",
+                "roles": ["applicant", "handler", "approver"], "demo": True}
+    user = SM_AUTH.get_user(user_id)
+    if not user:
+        session.pop("user_id", None)
+        return {"user_id": None, "username": "演示用户",
+                "roles": ["applicant", "handler", "approver"], "demo": True}
+    roles = set(ROLE_MANAGER.roles_for(user_id))
+    admin_username = os.environ.get("ADMIN_USERNAME", "").strip()
+    if admin_username and user["username"] == admin_username:
+        ROLE_MANAGER.assign(user_id, "admin")
+        roles.add("admin")
+    if not roles:
+        ROLE_MANAGER.assign(user_id, "applicant")
+        roles.add("applicant")
+    organizations = ORGANIZATION_MANAGER.list_for_user(user_id)
+    active_id = session.get("organization_id")
+    active = next((org for org in organizations if org["id"] == active_id), None)
+    effective_roles = set(active["labels"]) if active else roles
+    return {"user_id": user_id, "username": user["username"],
+            "roles": sorted(effective_roles), "global_roles": sorted(roles),
+            "organizations": organizations, "active_organization": active, "demo": False}
+
+
+def _require_capability(capability: str):
+    context = _current_user_context()
+    if context["demo"]:
+        return None
+    if not ROLE_MANAGER.allowed(context["roles"], capability):
+        return jsonify({"success": False, "message": "当前账号没有执行此操作的权限"}), 403
+    return None
+
+
+def _process_instance(app_id: str, create: bool = True):
+    instance_id = session.get(f"{app_id}_instance_id")
+    instance = PROCESS_MANAGER.get(instance_id) if instance_id else None
+    if instance is None and create:
+        user_id = session.get("user_id")
+        instance = PROCESS_MANAGER.create(app_id, user_id)
+        session[f"{app_id}_instance_id"] = instance["instance_id"]
+    return instance
+
+
+def _process_payload(app_id: str):
+    return _process_instance(app_id, create=False)
+
+
+def _unified_app_session_id():
+    sid = session.get("app_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["app_sid"] = sid
+    return sid
+
+
+def _auto_save_app(app_id: str, sid: str) -> None:
+    APP_SAVE_MANAGER.save(app_id, sid, "auto")
+    APP_SAVE_MANAGER.save_current(app_id, sid)
+
+
+@app.route('/api/apps/<app_id>/process', methods=['GET'])
+def process_instance_state(app_id):
+    instance = _process_payload(app_id)
+    return jsonify({"success": True, "process": instance})
+
+
+@app.route('/api/apps/<app_id>/process', methods=['POST'])
+def process_instance_create(app_id):
+    context = _current_user_context()
+    instance = PROCESS_MANAGER.create(app_id, context["user_id"])
+    session[f"{app_id}_instance_id"] = instance["instance_id"]
+    return jsonify({"success": True, "process": instance})
+
+
+@app.route('/api/apps/<app_id>/process/assign', methods=['POST'])
+def process_instance_assign(app_id):
+    denied = _require_capability("edit_template")
+    if denied:
+        return denied
+    instance = _process_payload(app_id)
+    if not instance:
+        return jsonify({"success": False, "message": "没有当前流程实例"}), 404
+    values = request.get_json(silent=True) or {}
+    try:
+        updated = PROCESS_MANAGER.assign(
+            instance["instance_id"],
+            applicant_id=values.get("applicant_id"),
+            handler_id=values.get("handler_id"),
+            approver_id=values.get("approver_id"),
+        )
+    except (KeyError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, "process": updated})
+
+
+@app.route('/workbench')
+def workbench_page():
+    return redirect('/static/workbench.html')
+
+
+@app.route('/api/workbench', methods=['GET'])
+def workbench_data():
+    context = _current_user_context()
+    user_id = context["user_id"]
+    if context["demo"]:
+        current = []
+        for app_id in ("request_form_demo", "task_flow_demo"):
+            instance = _process_payload(app_id)
+            if instance:
+                current.append(instance)
+        return jsonify({"success": True, "demo": True, "submitted": current, "tasks": current, "approvals": current, "completed": []})
+    return jsonify({"success": True, "demo": False,
+        "submitted": PROCESS_MANAGER.query(user_id=user_id, role="applicant"),
+        "tasks": PROCESS_MANAGER.query(user_id=user_id, role="handler"),
+        "approvals": PROCESS_MANAGER.query(user_id=user_id, role="approver"),
+        "completed": PROCESS_MANAGER.query(user_id=user_id, role="applicant", status="approved")})
+
+
+@app.route('/api/apps/<app_id>/state', methods=['GET'])
+def unified_app_state(app_id):
+    sid = session.get("app_sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["app_sid"] = sid
+    try:
+        payload = APP_SESSION_MANAGER.payload(app_id, sid)
+        payload.update(APP_SAVE_MANAGER.current_metadata(app_id, sid))
+        payload["process"] = _process_payload(app_id)
+        return jsonify({"success": True, **payload})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+
+
+@app.route('/api/apps/<app_id>/reset', methods=['POST'])
+def unified_app_reset(app_id):
+    sid = session.get("app_sid") or uuid.uuid4().hex
+    session["app_sid"] = sid
+    try:
+        APP_SESSION_MANAGER.reset(app_id, sid)
+        payload = APP_SESSION_MANAGER.payload(app_id, sid)
+        payload.update(APP_SAVE_MANAGER.current_metadata(app_id, sid))
+        payload["process"] = _process_payload(app_id)
+        return jsonify({"success": True, **payload})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+
+
+@app.route('/api/apps/<app_id>/transition', methods=['POST'])
+def unified_app_transition(app_id):
+    capability = "approve" if app_id == "request_form_demo" else "take_task"
+    denied = _require_capability(capability)
+    if denied:
+        return denied
+    sid = session.get("app_sid") or uuid.uuid4().hex
+    session["app_sid"] = sid
+    index = (request.get_json(silent=True) or {}).get("index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return jsonify({"success": False, "message": "index 必须是整数"}), 400
+    try:
+        instance = _process_instance(app_id)
+        context = _current_user_context()
+        if context["user_id"] is not None:
+            field = "approver_id" if app_id == "request_form_demo" else "handler_id"
+            current_id = instance.get(field)
+            if current_id not in (None, context["user_id"]) and "admin" not in context["roles"]:
+                return jsonify({"success": False, "message": "当前流程已分配给其他用户"}), 403
+            if current_id is None:
+                instance = PROCESS_MANAGER.assign(instance["instance_id"], **{field: context["user_id"]})
+        APP_SESSION_MANAGER.transition(app_id, sid, index)
+        if app_id == "request_form_demo":
+            PROCESS_MANAGER.set_status(instance["instance_id"], "approved" if index == 0 else "rejected")
+        else:
+            PROCESS_MANAGER.set_status(instance["instance_id"], "in_progress")
+        _auto_save_app(app_id, sid)
+        payload = APP_SESSION_MANAGER.payload(app_id, sid)
+        payload.update(APP_SAVE_MANAGER.current_metadata(app_id, sid))
+        payload["process"] = _process_payload(app_id)
+        return jsonify({"success": True, **payload})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    except (IndexError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+
+@app.route('/api/apps/<app_id>/saves', methods=['GET'])
+def unified_app_saves(app_id):
+    sid = _unified_app_session_id()
+    try:
+        return jsonify({"success": True, "saves": APP_SAVE_MANAGER.list_slots(app_id, sid)})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+
+
+@app.route('/api/apps/<app_id>/save', methods=['POST'])
+def unified_app_save(app_id):
+    sid = _unified_app_session_id()
+    payload = request.get_json(silent=True) or {}
+    slot = payload.get("slot", "auto")
+    expected_revision = payload.get("expected_revision")
+    if expected_revision is not None and (isinstance(expected_revision, bool) or not isinstance(expected_revision, int)):
+        return jsonify({"success": False, "message": "expected_revision 必须是整数"}), 400
+    try:
+        result = APP_SAVE_MANAGER.save(app_id, sid, slot, expected_revision)
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    except RevisionConflictError as exc:
+        return jsonify({"success": False, "message": str(exc), "conflict": True}), 409
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, "save": result})
+
+
+@app.route('/api/apps/<app_id>/load', methods=['POST'])
+def unified_app_load(app_id):
+    sid = _unified_app_session_id()
+    slot = (request.get_json(silent=True) or {}).get("slot", "auto")
+    try:
+        APP_SAVE_MANAGER.load(app_id, sid, slot)
+        payload = APP_SESSION_MANAGER.payload(app_id, sid)
+        payload.update(APP_SAVE_MANAGER.current_metadata(app_id, sid))
+        payload["process"] = _process_payload(app_id)
+        return jsonify({"success": True, **payload})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    except FileNotFoundError:
+        return jsonify({"success": False, "message": "没有找到存档"}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+
+
+@app.route('/api/apps/<app_id>/delete-save', methods=['POST'])
+def unified_app_delete_save(app_id):
+    sid = _unified_app_session_id()
+    slot = (request.get_json(silent=True) or {}).get("slot", "auto")
+    try:
+        deleted = APP_SAVE_MANAGER.delete(app_id, sid, slot)
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, "deleted": deleted})
+
+
+@app.route('/api/apps/<app_id>/submit', methods=['POST'])
+def unified_app_submit(app_id):
+    denied = _require_capability("submit_form")
+    if denied:
+        return denied
+    sid = session.get("app_sid") or uuid.uuid4().hex
+    session["app_sid"] = sid
+    try:
+        errors = APP_SESSION_MANAGER.submit_form(app_id, sid, request.get_json(silent=True) or {})
+    except KeyError:
+        return jsonify({"success": False, "message": "应用不存在"}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    if errors:
+        return jsonify({"success": False, "errors": errors}), 400
+    context = _current_user_context()
+    instance = _process_instance(app_id)
+    if context["user_id"] is not None:
+        instance = PROCESS_MANAGER.assign(instance["instance_id"], applicant_id=context["user_id"])
+    PROCESS_MANAGER.set_status(instance["instance_id"], "submitted")
+    _auto_save_app(app_id, sid)
+    payload = APP_SESSION_MANAGER.payload(app_id, sid)
+    payload.update(APP_SAVE_MANAGER.current_metadata(app_id, sid))
+    payload["process"] = _process_payload(app_id)
+    return jsonify({"success": True, **payload})
+
+
+@app.route('/task')
+def serve_task():
+    return redirect('/static/task.html')
+
+
+@app.route('/task/editor')
+def serve_task_editor():
+    return redirect('/static/task-editor.html')
+
+
+@app.route('/api/task/state', methods=['GET'])
+def task_state():
+    return jsonify({"success": True, **_task_payload(_task_runtime())})
+
+
+@app.route('/api/task/advance', methods=['POST'])
+def task_advance():
+    denied = _require_capability("take_task")
+    if denied:
+        return denied
+    payload = request.get_json(silent=True) or {}
+    index = payload.get("index")
+    if isinstance(index, bool) or not isinstance(index, int):
+        return jsonify({"success": False, "message": "index 必须是整数"}), 400
+    try:
+        runtime = _task_runtime()
+        runtime.advance(index)
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, **_task_payload(runtime)})
+
+
+@app.route('/api/task/reset', methods=['POST'])
+def task_reset():
+    sid = session.get("task_sid")
+    if sid:
+        APP_SESSION_MANAGER.reset("task_flow_demo", sid)
+    return jsonify({"success": True, **_task_payload(_task_runtime())})
+
+
+@app.route('/api/task/editor/data', methods=['GET'])
+def task_editor_data():
+    try:
+        with open(os.path.join(TASK_TEMPLATE_DIR, "app.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        with open(os.path.join(TASK_TEMPLATE_DIR, "nodes.json"), encoding="utf-8") as handle:
+            nodes = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+    return jsonify({"success": True, "config": config, "nodes": nodes})
+
+
+@app.route('/api/task/editor/save', methods=['POST'])
+def task_editor_save():
+    denied = _require_capability("edit_template")
+    if denied:
+        return denied
+    payload = request.get_json(silent=True) or {}
+    config, nodes = payload.get("config"), payload.get("nodes")
+    try:
+        if not isinstance(config, dict) or not isinstance(nodes, dict):
+            raise ValueError("config 和 nodes 必须是对象")
+        if not str(config.get("title", "")).strip():
+            raise ValueError("任务流程标题不能为空")
+        TaskFlowRuntime(RuntimeDefinition(config, {"nodes": nodes}), nodes)
+        for node_id, node in nodes.items():
+            if not str(node.get("title", "")).strip():
+                raise ValueError(f"节点 {node_id} 标题不能为空")
+            for transition in node.get("transitions", []):
+                if not str(transition.get("label", "")).strip():
+                    raise ValueError(f"节点 {node_id} 存在空转移名称")
+        for filename, data in (("app.json", config), ("nodes.json", nodes)):
+            target = os.path.join(TASK_TEMPLATE_DIR, filename)
+            temp = target + ".tmp"
+            with open(temp, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            os.replace(temp, target)
+    except (OSError, TypeError, ValueError, KeyError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    TASK_SESSIONS.clear()
+    return jsonify({"success": True, "message": "任务流程已保存"})
+
+
 @app.route('/story')
 def serve_story():
     return redirect('/static/story.html')
@@ -273,6 +778,9 @@ def story_editor_data():
 
 @app.route('/api/story/editor/save', methods=['POST'])
 def story_editor_save():
+    denied = _require_capability("edit_template")
+    if denied:
+        return denied
     payload = request.get_json(silent=True) or {}
     config = payload.get("config")
     pages = payload.get("pages")
@@ -295,9 +803,43 @@ def story_state():
 def story_reset():
     sid = session.get("story_sid")
     if sid:
-        STORY_SESSIONS.pop(sid, None)
+        APP_SESSION_MANAGER.reset("first_branch", sid)
     runtime = _story_runtime()
     return jsonify({"success": True, **_story_payload(runtime)})
+
+
+@app.route('/api/story/save', methods=['POST'])
+def story_save():
+    runtime = _story_runtime()
+    sid = session.get("story_sid")
+    slot = (request.get_json(silent=True) or {}).get("slot", "auto")
+    if not isinstance(slot, str) or not slot or len(slot) > 32:
+        return jsonify({"success": False, "message": "存档槽位无效"}), 400
+    data = {"runtime_type": "interactive_story", "app_id": runtime.definition.app_id,
+            "state": runtime.state.export()}
+    result = STORY_SAVE.save_slot(sid, f"story_{slot}", data)
+    return jsonify({"success": True, "slot": slot, "result": result})
+
+
+@app.route('/api/story/load', methods=['POST'])
+def story_load():
+    sid = session.get("story_sid")
+    payload = request.get_json(silent=True) or {}
+    slot = payload.get("slot", "auto")
+    if not isinstance(slot, str) or not slot or len(slot) > 32:
+        return jsonify({"success": False, "message": "存档槽位无效"}), 400
+    saved = STORY_SAVE.load_slot(sid, f"story_{slot}")
+    if not saved or saved.get("runtime_type") != "interactive_story":
+        return jsonify({"success": False, "message": "没有找到故事存档"}), 404
+    runtime = _story_runtime()
+    saved_state = saved.get("state") or {}
+    current = saved_state.get("current_node", saved_state.get("current_page"))
+    if current not in runtime.pages and current is not None:
+        return jsonify({"success": False, "message": "存档页面已不存在"}), 400
+    runtime.state.replace(saved_state)
+    runtime.state.set("current_node", current)
+    runtime.state.set("current_page", current)
+    return jsonify({"success": True, "slot": slot, **_story_payload(runtime)})
 
 
 @app.route('/api/story/choose', methods=['POST'])
@@ -346,12 +888,12 @@ def get_state():
         "player_gold": e["game_state"].get("player_gold", 0),
         "flags": e["game_state"].get("flags", {}),
         "game_time": e["game_state"].get("game_time", 0),
-        "npcs_here": e["npc_system"].list_npcs_in_scene(scene_id),      # 🆕 场景里的 NPC
-        "enemies_here": e["combat_system"].list_enemies_in_scene(scene_id),  # 🆕 场景里的敌人
+        "npcs_here": e["npc_system"].list_npcs_in_scene(scene_id),      # 场景里的 NPC
+        "enemies_here": e["combat_system"].list_enemies_in_scene(scene_id),  # 场景里的敌人
     })
 
 
-# ---------- 🆕 主动触发对话/战斗的路由 ----------
+# ---------- 主动触发对话/战斗的路由 ----------
 @app.route('/api/dialogue/start', methods=['POST'])
 def start_dialogue():
     """玩家点"和 XX 说话" → 手动启动对话"""
@@ -407,7 +949,7 @@ def handle_action():
         # 行动时间推进后静默结算脱离休整恢复（未脱离/未启用 Beat 时空操作）
         beat_combat.tick_recover(e["combat_system"], e["game_state"], GAME_DATA)
 
-    # 🆕 玩家做了操作 → 尝试自动存档（离线模式 + 30秒防抖）
+    #  玩家做了操作 → 尝试自动存档（离线模式 + 30秒防抖）
     if result.get("success"):
         _maybe_autosave(e)
     return jsonify(result)
@@ -485,7 +1027,7 @@ def handle_attack():
     result = e["combat_system"].player_attack(weapon_id)
     # 战斗推进游戏时间（每回合秒数由 game_config 配置）
     e["game_state"]["game_time"] = e["game_state"].get("game_time", 0) + _action_time("combat_turn", 60)
-    # 🆕 战斗后也自动存档
+    # 战斗后也自动存档
     if result.get("success") or result.get("player_dead"):
         beat_combat.tick_recover(e["combat_system"], e["game_state"], GAME_DATA)
         _maybe_autosave(e)
@@ -548,6 +1090,9 @@ def auth_register():
         session['user_id'] = user_id
         session['username'] = username
         session['mode'] = 'online'
+        ROLE_MANAGER.assign(user_id, "applicant")
+        if os.environ.get("ADMIN_USERNAME", "").strip() == username:
+            ROLE_MANAGER.assign(user_id, "admin")
         return jsonify({"success": True, "message": msg, "user_id": user_id, "username": username})
     return jsonify({"success": False, "message": msg})
 
@@ -578,8 +1123,112 @@ def auth_logout():
     session.pop('username', None)
     session.pop('_last_autosave', None)
     session.pop('mode', None)       # 清掉 mode，让前端重新选
-    # session.pop('sid', None)      # ❌ 不要清！sid 是离线模式隔离键
+    # session.pop('sid', None)      # 不要清！sid 是离线模式隔离键
     return jsonify({"success": True, "message": "已退出登录"})
+
+
+@app.route('/api/organizations', methods=['GET'])
+def organization_list():
+    context = _current_user_context()
+    if context["demo"]:
+        return jsonify({"success": True, "organizations": [], "active": None})
+    return jsonify({"success": True, "organizations": context["organizations"], "active": context["active_organization"]})
+
+
+@app.route('/api/organizations', methods=['POST'])
+def organization_create():
+    context = _current_user_context()
+    if context["demo"]:
+        return jsonify({"success": False, "message": "请先登录后创建组织"}), 401
+    try:
+        organization = ORGANIZATION_MANAGER.create(
+            (request.get_json(silent=True) or {}).get("name", ""), context["user_id"]
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    session["organization_id"] = organization["id"]
+    return jsonify({"success": True, "organization": organization})
+
+
+@app.route('/api/organizations/join', methods=['POST'])
+def organization_join():
+    context = _current_user_context()
+    if context["demo"]:
+        return jsonify({"success": False, "message": "请先登录后加入组织"}), 401
+    try:
+        organization = ORGANIZATION_MANAGER.join(
+            (request.get_json(silent=True) or {}).get("join_code", ""), context["user_id"]
+        )
+    except KeyError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 404
+    session["organization_id"] = organization["id"]
+    return jsonify({"success": True, "organization": organization})
+
+
+@app.route('/api/organizations/select', methods=['POST'])
+def organization_select():
+    context = _current_user_context()
+    if context["demo"]:
+        return jsonify({"success": False, "message": "请先登录"}), 401
+    organization_id = (request.get_json(silent=True) or {}).get("organization_id")
+    if not any(org["id"] == organization_id for org in context["organizations"]):
+        return jsonify({"success": False, "message": "不是该组织成员"}), 403
+    session["organization_id"] = organization_id
+    return jsonify({"success": True, "user": _current_user_context()})
+
+
+@app.route('/api/organizations/<int:organization_id>/members', methods=['GET'])
+def organization_members(organization_id):
+    context = _current_user_context()
+    if not context["active_organization"] or context["active_organization"]["id"] != organization_id:
+        return jsonify({"success": False, "message": "请先选择组织"}), 403
+    return jsonify({"success": True, "members": ORGANIZATION_MANAGER.members(organization_id)})
+
+
+@app.route('/api/organizations/<int:organization_id>/members/<int:user_id>/labels', methods=['POST'])
+def organization_labels(organization_id, user_id):
+    context = _current_user_context()
+    active = context["active_organization"]
+    if not active or active["id"] != organization_id or "admin" not in active["labels"]:
+        return jsonify({"success": False, "message": "只有组织管理员可以修改成员标签"}), 403
+    try:
+        ORGANIZATION_MANAGER.set_labels(
+            organization_id, user_id, (request.get_json(silent=True) or {}).get("labels", [])
+        )
+    except (KeyError, ValueError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, "members": ORGANIZATION_MANAGER.members(organization_id)})
+
+
+@app.route('/api/auth/roles', methods=['GET'])
+def auth_roles():
+    return jsonify({"success": True, "user": _current_user_context()})
+
+
+@app.route('/api/auth/roles/<int:user_id>', methods=['POST'])
+def assign_role(user_id):
+    denied = _require_capability("edit_template")
+    if denied:
+        return denied
+    role = (request.get_json(silent=True) or {}).get("role")
+    if role not in VALID_ROLES:
+        return jsonify({"success": False, "message": "无效角色"}), 400
+    try:
+        ROLE_MANAGER.assign(user_id, role)
+    except ValueError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    return jsonify({"success": True, "user_id": user_id, "roles": ROLE_MANAGER.roles_for(user_id)})
+
+
+@app.route('/api/auth/roles/<int:user_id>', methods=['DELETE'])
+def revoke_role(user_id):
+    denied = _require_capability("edit_template")
+    if denied:
+        return denied
+    role = (request.get_json(silent=True) or {}).get("role")
+    if role not in VALID_ROLES:
+        return jsonify({"success": False, "message": "无效角色"}), 400
+    return jsonify({"success": True, "deleted": ROLE_MANAGER.revoke(user_id, role), "roles": ROLE_MANAGER.roles_for(user_id)})
 
 
 @app.route('/api/auth/me', methods=['GET'])
@@ -951,3 +1600,10 @@ if __name__ == '__main__':
     # 开发模式才跑 Flask 内置服务器，生产用 gunicorn
     if os.environ.get('GUNICORN_RUNNING', '').lower() != 'true':
         app.run(host='0.0.0.0', port=5000, debug=DEBUG)
+
+
+@app.errorhandler(404)
+def handle_not_found(error):
+    if request.path.startswith("/api/"):
+        return jsonify({"success": False, "message": f"API 路由不存在: {request.path}"}), 404
+    return error

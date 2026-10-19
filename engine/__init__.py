@@ -13,13 +13,24 @@ from .save_manager import SaveManager
 from .auth_manager import AuthManager
 from .event_rules import DeclarativeRules
 from . import beat_combat
+from .organization_manager import OrganizationManager, ORG_LABELS
+from .process_instance_manager import ProcessInstanceManager
+from .role_manager import RoleManager, VALID_ROLES
 from .runtime import (
     ActionContext,
     ActionRegistry,
+    AppRegistry,
+    ApplicationSaveManager,
+    ApplicationSessionManager,
+    RevisionConflictError,
+    ApplicationRuntime,
     ConditionEvaluator,
+    FlowRuntime,
+    FormFlowRuntime,
     InteractiveStoryRuntime,
     RuntimeDefinition,
     RuntimeState,
+    TaskFlowRuntime,
 )
 
 __all__ = [
@@ -35,10 +46,23 @@ __all__ = [
     "AuthManager",
     "DeclarativeRules",
     "beat_combat",
+    "RoleManager",
+    "VALID_ROLES",
+    "ProcessInstanceManager",
+    "OrganizationManager",
+    "ORG_LABELS",
     "ActionContext",
     "ActionRegistry",
+    "AppRegistry",
+    "ApplicationSaveManager",
+    "ApplicationSessionManager",
+    "RevisionConflictError",
+    "ApplicationRuntime",
     "ConditionEvaluator",
+    "FlowRuntime",
+    "FormFlowRuntime",
     "InteractiveStoryRuntime",
     "RuntimeDefinition",
     "RuntimeState",
+    "TaskFlowRuntime",
 ]

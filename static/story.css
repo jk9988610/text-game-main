@@ -47,3 +47,11 @@ h2 { font-size: clamp(24px, 4vw, 34px); }
   .story-panel { margin-top: 28px; padding: 24px 18px; }
   .story-footer { align-items: flex-start; flex-direction: column; }
 }
+
+.save-panel{margin:18px 0;padding:14px;background:rgba(255,255,255,.03);border:1px solid var(--line,#3b3e45)}.save-panel-head,.save-panel-actions{display:flex;align-items:center;gap:8px}.save-panel-head{justify-content:space-between;margin-bottom:10px}.save-status{color:var(--muted,#a5a6ab);font-size:12px}.save-status[data-error="true"]{color:#f58d8d}.save-slot{min-width:110px;flex:1;background:#111216;color:inherit;border:1px solid var(--line,#3b3e45);padding:7px}.save-panel button{background:transparent;color:inherit;border:1px solid var(--line,#3b3e45);padding:6px 9px;cursor:pointer}.save-panel button:hover{border-color:var(--accent,#d6a85f)}.save-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.save-item{font-size:12px;color:var(--muted,#a5a6ab)}@media(max-width:600px){.save-panel-actions{flex-wrap:wrap}.save-slot{flex-basis:100%}}
+
+.auth-panel{font-size:12px}.auth-summary{display:flex;align-items:center;gap:8px}.auth-roles{color:var(--muted)}.auth-panel button{color:inherit;background:transparent;border:1px solid var(--line);padding:5px 8px;cursor:pointer}.auth-form{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.auth-form input{width:110px;padding:5px;background:#111216;color:inherit;border:1px solid var(--line)}.auth-error{color:#f58d8d}
+
+.auth-org{color:var(--muted)}.org-actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.org-actions input,.org-actions select{width:110px;padding:5px;background:#111216;color:inherit;border:1px solid var(--line)}
+
+.account-button{color:inherit;background:transparent;border:1px solid var(--line);padding:6px 10px;cursor:pointer}.account-dialog{width:min(430px,calc(100% - 32px));background:#181a1f;color:inherit;border:1px solid var(--line);padding:20px}.account-dialog::backdrop{background:rgba(0,0,0,.62)}.dialog-head,.account-summary,.auth-actions{display:flex;align-items:center;gap:10px}.dialog-head{justify-content:space-between;margin-bottom:18px}.dialog-close{font-size:20px!important;border:0!important}.auth-actions{margin:16px 0}.invite-hint{font-size:12px;color:var(--accent)}

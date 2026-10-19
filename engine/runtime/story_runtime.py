@@ -1,16 +1,14 @@
-"""最小互动故事运行时适配器。"""
+"""互动故事到通用 FlowRuntime 的兼容适配器。"""
 import json
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-from .action_registry import ActionContext, ActionRegistry
-from .condition_evaluator import ConditionEvaluator
+from .flow_runtime import FlowRuntime
 from .runtime_definition import RuntimeDefinition
-from .runtime_state import RuntimeState
 
 
 class InteractiveStoryRuntime:
-    """将互动故事页面适配到通用 RuntimeState 和 ActionRegistry。"""
+    """保留旧 pages/choices 接口，同时由 FlowRuntime 执行实际逻辑。"""
 
     def __init__(self, definition: RuntimeDefinition,
                  pages: Mapping[str, Mapping[str, Any]]):
@@ -20,11 +18,14 @@ class InteractiveStoryRuntime:
         self.pages: Dict[str, Dict[str, Any]] = {
             str(key): dict(value) for key, value in pages.items()
         }
-        self.state = RuntimeState(definition.initial_state)
-        self.state.set("current_page", definition.initial_page)
-        self.actions = ActionRegistry()
-        self.actions.register("set_variable", self._set_variable)
-        self.actions.register("modify_variable", self._modify_variable)
+        self.flow = FlowRuntime(
+            self._to_nodes(self.pages),
+            definition.initial_page,
+            definition.initial_state,
+        )
+        self.flow.state.set("current_page", definition.initial_page)
+        self.state = self.flow.state
+        self.actions = self.flow.actions
         self.validate()
 
     @classmethod
@@ -36,46 +37,64 @@ class InteractiveStoryRuntime:
             pages = json.load(handle)
         return cls(RuntimeDefinition(config, {"pages": pages}), pages)
 
+    @staticmethod
+    def _to_nodes(pages: Mapping[str, Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        return {
+            page_id: {
+                "title": page.get("title", ""),
+                "content": page.get("text", ""),
+                "transitions": [
+                    {
+                        "label": choice.get("text", ""),
+                        "to": choice.get("next"),
+                        "if": choice.get("if"),
+                        "actions": choice.get("actions", []),
+                    }
+                    for choice in page.get("choices", [])
+                ],
+            }
+            for page_id, page in pages.items()
+        }
+
     def validate(self) -> None:
-        initial = self.definition.initial_page
-        if initial not in self.pages:
-            raise ValueError(f"initial page does not exist: {initial!r}")
+        self.flow.validate()
         for page_id, page in self.pages.items():
             if not isinstance(page.get("text"), str):
                 raise ValueError(f"page {page_id!r} must have text")
-            for choice in page.get("choices", []):
-                target = choice.get("next")
-                if target is not None and target not in self.pages:
-                    raise ValueError(
-                        f"choice from {page_id!r} points to missing page {target!r}"
-                    )
 
     def current_page(self) -> Dict[str, Any]:
-        page_id = self.state.get("current_page")
+        page_id = self.state.get("current_node")
         if page_id is None:
             return {}
         page = dict(self.pages[page_id])
-        page["choices"] = [
-            choice for choice in page.get("choices", [])
-            if ConditionEvaluator(self.state).matches(choice.get("if"))
-        ]
+        page["choices"] = []
+        for transition in self.flow.current_node().get("transitions", []):
+            choice = {"text": transition.get("label", ""),
+                      "next": transition.get("to")}
+            if transition.get("if") is not None:
+                choice["if"] = transition["if"]
+            if transition.get("actions"):
+                choice["actions"] = transition["actions"]
+            page["choices"].append(choice)
         return page
 
+    def payload(self) -> Dict[str, Any]:
+        return {
+            "page_id": self.state.get("current_page"),
+            "page": self.current_page(),
+            "state": self.state.export(),
+        }
+
     def choose(self, index: int) -> Dict[str, Any]:
-        page = self.current_page()
-        choices = page.get("choices", [])
-        if not isinstance(index, int) or index < 0 or index >= len(choices):
-            raise IndexError("choice index out of range")
-        choice = choices[index]
-        context = ActionContext(self.state, {"pages": self.pages})
-        self.actions.execute_many(choice.get("actions", []), context)
-        self.state.set("current_page", choice.get("next"))
-        return self.current_page() if choice.get("next") is not None else {}
+        self.flow.transition(index)
+        self.state.set("current_page", self.state.get("current_node"))
+        return self.current_page()
 
-    @staticmethod
-    def _set_variable(context: ActionContext, action: Dict[str, Any]) -> Any:
-        return context.state.set(action["path"], action.get("value"))
+    def transition(self, index: int) -> Dict[str, Any]:
+        return self.choose(index)
 
-    @staticmethod
-    def _modify_variable(context: ActionContext, action: Dict[str, Any]) -> Any:
-        return context.state.update(action["path"], action["amount"])
+    def validate_state(self, state: Mapping[str, Any]) -> None:
+        page_id = state.get("current_page", state.get("current_node"))
+        if page_id is not None and page_id not in self.pages:
+            raise ValueError("存档页面已不存在")
+

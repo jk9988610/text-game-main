@@ -1,4 +1,6 @@
 const $ = (id) => document.getElementById(id);
+const authPanel = AuthPanel.create();
+$("auth-panel").appendChild(authPanel.root);
 
 function showError(message) {
   const node = $("story-error");
@@ -29,7 +31,7 @@ function render(payload) {
 }
 
 async function loadState() {
-  const response = await fetch("/api/story/state");
+  const response = await fetch("/api/apps/first_branch/state");
   const payload = await response.json();
   if (!response.ok || payload.success === false) throw new Error(payload.message);
   render(payload);
@@ -38,7 +40,7 @@ async function loadState() {
 async function choose(index) {
   document.querySelectorAll(".choice").forEach((button) => { button.disabled = true; });
   try {
-    const response = await fetch("/api/story/choose", {
+    const response = await fetch("/api/apps/first_branch/transition", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ index }),
@@ -54,7 +56,7 @@ async function choose(index) {
 
 $("restart").addEventListener("click", async () => {
   try {
-    const response = await fetch("/api/story/reset", { method: "POST" });
+    const response = await fetch("/api/apps/first_branch/reset", { method: "POST" });
     const payload = await response.json();
     if (!response.ok || payload.success === false) throw new Error(payload.message);
     render(payload);
@@ -63,4 +65,12 @@ $("restart").addEventListener("click", async () => {
   }
 });
 
-loadState().catch((error) => showError(error.message));
+const savePanel = AppSavePanel.create({ appId: "first_branch", onState: render });
+$("save-panel").appendChild(savePanel.root);
+(async () => {
+  try {
+    await AppSavePanel.chooseResume({ appId: "first_branch", onState: render });
+    await loadState();
+    await savePanel.refresh();
+  } catch (error) { showError(error.message); }
+})();

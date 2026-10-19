@@ -1,0 +1,19 @@
+{
+  "draft": {
+    "title": "填写申请",
+    "content": "请填写申请信息，然后提交审批。",
+    "transitions": [
+      {"label": "提交审批", "to": "review", "actions": [{"type": "append_record", "path": "records.history", "value": "申请已提交"}]}
+    ]
+  },
+  "review": {
+    "title": "审批中",
+    "content": "申请已提交，等待审批决定。",
+    "transitions": [
+      {"label": "批准申请", "to": "approved", "actions": [{"type": "append_record", "path": "records.history", "value": "申请已批准"}]},
+      {"label": "驳回申请", "to": "rejected", "actions": [{"type": "append_record", "path": "records.history", "value": "申请已驳回"}]}
+    ]
+  },
+  "approved": {"title": "已批准", "content": "申请已通过。", "transitions": []},
+  "rejected": {"title": "已驳回", "content": "申请未通过。", "transitions": []}
+}

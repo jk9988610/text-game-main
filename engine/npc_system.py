@@ -38,14 +38,14 @@ class NPCSystem:
 
     # ---------- 事件回调（纯被动，不主动调用） ----------
     def _on_scene_enter(self, scene_id: str, **kwargs) -> None:
-        """🆕 进场景不再自动开对话！只清掉跨场景残留的对话"""
+        """进场景不再自动开对话！只清掉跨场景残留的对话"""
         self.end_dialogue()
 
     def _on_scene_leave(self, scene_id: str, **kwargs) -> None:
         """离开场景 → 清空对话状态"""
         self.end_dialogue()
 
-    # ---------- 🆕 主动触发接口（给前端按钮点时调用） ----------
+    # ---------- 主动触发接口（给前端按钮点时调用） ----------
     def start_dialogue(self, npc_id: str) -> Dict[str, Any]:
         """玩家点"和 XX 说话"按钮 → 手动启动对话"""
         npc = self._get_npc(npc_id)
@@ -72,7 +72,7 @@ class NPCSystem:
         return npc.get("greeting", "greet")
 
     def list_npcs_in_scene(self, scene_id: str) -> list:
-        """🆕 返回场景里所有 NPC 列表（给前端渲染按钮用）"""
+        """返回场景里所有 NPC 列表（给前端渲染按钮用）"""
         result = []
         for npc_data in self._data.get("npcs", {}).values():
             if npc_data.get("scene_id") == scene_id:

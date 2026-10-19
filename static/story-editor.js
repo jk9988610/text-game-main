@@ -1,5 +1,15 @@
 const $ = (id) => document.getElementById(id);
+const authPanel = AuthPanel.create({ onChange: updateEditorPermission });
+$("auth-panel").appendChild(authPanel.root);
 const model = { config: null, pages: {}, selected: null };
+
+function updateEditorPermission(context) {
+  const save = $("save");
+  if (!save) return;
+  const allowed = context.demo || (context.roles || []).includes("admin");
+  save.disabled = !allowed;
+  save.title = allowed ? "" : "需要管理员角色才能保存模板";
+}
 
 function notice(message, error = false) {
   const node = $("notice");
@@ -78,7 +88,7 @@ function renderChoices() {
       if (!path) delete choice.if;
       else {
         const raw = card.querySelector(".choice-if-value").value;
-        const value = raw === "true" ? true : raw === "false" ? false : (raw !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : raw);
+        const value = FlowEditorCore.parseScalar(raw);
         choice.if = { path, operator: card.querySelector(".choice-if-op").value, value };
       }
       const type = card.querySelector(".action-type").value;
@@ -87,7 +97,7 @@ function renderChoices() {
         const action = { type, path: card.querySelector(".action-path").value.trim() };
         const raw = card.querySelector(".action-value").value;
         if (type === "set_variable") action.value = raw === "true" ? true : raw === "false" ? false : raw;
-        else action.amount = Number(raw);
+        else action.amount = Number(FlowEditorCore.parseScalar(raw));
         choice.actions = [action];
       }
     };
@@ -116,8 +126,7 @@ function escapeHtml(value) {
 
 $("add-page").addEventListener("click", () => {
   updateModel();
-  let id = "new_page", count = 2;
-  while (model.pages[id]) id = `new_page_${count++}`;
+  const id = FlowEditorCore.uniqueId(model.pages, "new_page");
   model.pages[id] = { title: "新页面", text: "", choices: [] };
   model.selected = id; render();
 });
@@ -126,7 +135,7 @@ $("delete-page").addEventListener("click", () => {
   const id = model.selected;
   if (!window.confirm(`删除页面 ${id}？相关选项会变成故事结束。`)) return;
   delete model.pages[id];
-  Object.values(model.pages).forEach((page) => (page.choices || []).forEach((choice) => { if (choice.next === id) choice.next = null; }));
+  FlowEditorCore.removeNodeReferences(model.pages, id);
   if (model.config.initial_page === id) model.config.initial_page = Object.keys(model.pages)[0];
   model.selected = Object.keys(model.pages)[0]; render();
 });
@@ -139,9 +148,7 @@ $("initial-page").addEventListener("change", updateModel);
 $("save").addEventListener("click", async () => {
   updateModel();
   try {
-    const response = await fetch("/api/story/editor/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: model.config, pages: model.pages }) });
-    const payload = await response.json();
-    if (!response.ok || payload.success === false) throw new Error(payload.message);
+    const payload = await FlowEditorCore.requestJSON("/api/story/editor/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config: model.config, pages: model.pages }) });
     notice(payload.message || "已保存");
   } catch (error) { notice(error.message, true); }
 });

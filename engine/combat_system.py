@@ -26,7 +26,7 @@ class CombatSystem:
         # 初始化战斗状态（和 current_scene/current_dialogue 同级）
         self._state["current_battle"] = None  # {"enemy_id": "...", "enemy_hp": 20}
 
-        # 🆕 不再订阅 SCENE_ENTER 自动开怪！改成玩家主动点按钮触发
+        #  不再订阅 SCENE_ENTER 自动开怪！改成玩家主动点按钮触发
 
     # ---------- 公共出口（其他引擎模块经由它们发事件/结算，不触碰内部字段） ----------
     def publish(self, event: str, **kwargs) -> None:
@@ -46,7 +46,7 @@ class CombatSystem:
         self._bus.publish("COMBAT_DEATH", dead=enemy["id"])
         # 语义干净的击杀事件（玩家死亡不发），供事件规则做"击杀任务/掉落"
         self._bus.publish("ENEMY_KILLED", enemy_id=enemy["id"])
-        # 🆕 关键：标记永久死亡 → 以后再进洞穴不会复活了
+        #关键：标记永久死亡 → 以后再进洞穴不会复活了
         self._state.setdefault("killed_enemies", [])
         if enemy["id"] not in self._state["killed_enemies"]:
             self._state["killed_enemies"].append(enemy["id"])
@@ -71,14 +71,14 @@ class CombatSystem:
 
     # ---------- 事件回调（不再自动开战斗） ----------
     def _on_scene_enter(self, scene_id: str, **kwargs) -> None:
-        """🆕 进场景不再自动开战斗！只检查：已有 current_battle 但敌人已死 → 清掉"""
+        """ 进场景不再自动开战斗！只检查：已有 current_battle 但敌人已死 → 清掉"""
         battle = self._state.get("current_battle")
         if battle:
             killed = self._state.get("killed_enemies", [])
             if battle["enemy_id"] in killed:
                 self.end_battle()
 
-    # ---------- 🆕 主动触发接口（给前端按钮点时调用） ----------
+    # ----------  主动触发接口（给前端按钮点时调用） ----------
     def start_battle(self, enemy_id: str) -> Dict[str, Any]:
         """玩家点"挑战 XX"按钮 → 手动开始/继续战斗
         
@@ -93,7 +93,7 @@ class CombatSystem:
         if not enemy:
             return {"success": False, "message": "敌人不存在"}
 
-        # 🆕 残血复用：已有 current_battle 且敌人匹配 → 直接返回（保留残血！）
+        # 残血复用：已有 current_battle 且敌人匹配 → 直接返回（保留残血！）
         existing = self._state.get("current_battle")
         if existing and existing.get("enemy_id") == enemy_id:
             return {"success": True, "message": f"你继续与【{enemy['name']}】战斗！（敌人HP: {existing['enemy_hp']}/{enemy['hp']}）"}
@@ -107,7 +107,7 @@ class CombatSystem:
         return {"success": True, "message": f"你向【{enemy['name']}】发起了攻击！"}
 
     def list_enemies_in_scene(self, scene_id: str) -> list:
-        """🆕 返回场景里活着的敌人列表（给前端渲染按钮用）"""
+        """返回场景里活着的敌人列表（给前端渲染按钮用）"""
         killed = self._state.get("killed_enemies", [])
         return [
             {"id": e["id"], "name": e["name"]}
@@ -147,7 +147,7 @@ class CombatSystem:
     def get_battle_for_api(self) -> Dict[str, Any]:
         """获取当前战斗的可渲染数据（给前端用）
         
-        🆕 关键改进：只有当玩家在敌人所在场景时才 active=true
+        关键改进：只有当玩家在敌人所在场景时才 active=true
         否则 active=false 但**不清 current_battle**（保留敌人残血！）
         """
         battle = self._state.get("current_battle")
@@ -160,7 +160,7 @@ class CombatSystem:
             self.end_battle()
             return {"active": False, "player": player}
 
-        # 🆕 检查玩家当前场景有没有这个敌人 —— 没有就返回 inactive（但保留残血）
+        # 检查玩家当前场景有没有这个敌人 —— 没有就返回 inactive（但保留残血）
         current_scene = self._state.get("current_scene", "")
         scene_enemy_ids = self._data.get("scenes", {}).get(current_scene, {}).get("enemies_here", [])
         if battle["enemy_id"] not in scene_enemy_ids:

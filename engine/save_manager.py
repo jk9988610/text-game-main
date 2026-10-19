@@ -63,7 +63,8 @@ class SaveManager:
 
     def _init_schema(self) -> None:
         """首次运行时建表"""
-        with self._get_conn() as conn:
+        conn = self._get_conn()
+        try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS saves (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +77,9 @@ class SaveManager:
                     UNIQUE(session_id, slot_name)  -- 每个 session 的每个槽位唯一
                 )
             """)
+            conn.commit()
+        finally:
+            conn.close()
 
     # ---------- 核心接口 ----------
     def save_slot(self, session_id: str, slot_name: str, game_state: Dict[str, Any],
@@ -83,33 +87,41 @@ class SaveManager:
         """存档到指定槽位"""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data_json = json.dumps(game_state, ensure_ascii=False)
-        with self._lock, self._get_conn() as conn:
-            # 存在则更新，不存在则插入
-            existing = conn.execute(
-                "SELECT id FROM saves WHERE session_id=? AND slot_name=?",
-                (session_id, slot_name)
-            ).fetchone()
-            if existing:
-                conn.execute(
-                    "UPDATE saves SET data=?, is_auto=?, updated_at=? WHERE id=?",
-                    (data_json, 1 if is_auto else 0, now, existing["id"])
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO saves (session_id, slot_name, is_auto, data, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (session_id, slot_name, 1 if is_auto else 0, data_json, now, now)
-                )
-            conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                # 存在则更新，不存在则插入
+                existing = conn.execute(
+                    "SELECT id FROM saves WHERE session_id=? AND slot_name=?",
+                    (session_id, slot_name)
+                ).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE saves SET data=?, is_auto=?, updated_at=? WHERE id=?",
+                        (data_json, 1 if is_auto else 0, now, existing["id"])
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO saves (session_id, slot_name, is_auto, data, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (session_id, slot_name, 1 if is_auto else 0, data_json, now, now)
+                    )
+                conn.commit()
+            finally:
+                conn.close()
         return {"success": True, "slot_name": slot_name, "created_at": now}
 
     def load_slot(self, session_id: str, slot_name: str) -> Optional[Dict[str, Any]]:
         """读取存档 + normalize（补全缺失字段）→ 兼容老存档"""
-        with self._lock, self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT data FROM saves WHERE session_id=? AND slot_name=?",
-                (session_id, slot_name)
-            ).fetchone()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                row = conn.execute(
+                    "SELECT data FROM saves WHERE session_id=? AND slot_name=?",
+                    (session_id, slot_name)
+                ).fetchone()
+            finally:
+                conn.close()
         if not row:
             return None
         raw = json.loads(row["data"])
@@ -117,12 +129,16 @@ class SaveManager:
 
     def list_slots(self, session_id: str) -> List[Dict[str, Any]]:
         """列出当前 session 所有存档槽位（带时间戳）"""
-        with self._lock, self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT slot_name, is_auto, created_at, updated_at FROM saves "
-                "WHERE session_id=? ORDER BY is_auto DESC, updated_at DESC",
-                (session_id,)
-            ).fetchall()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                rows = conn.execute(
+                    "SELECT slot_name, is_auto, created_at, updated_at FROM saves "
+                    "WHERE session_id=? ORDER BY is_auto DESC, updated_at DESC",
+                    (session_id,)
+                ).fetchall()
+            finally:
+                conn.close()
         return [
             {
                 "slot_name": r["slot_name"],
@@ -135,13 +151,17 @@ class SaveManager:
 
     def delete_slot(self, session_id: str, slot_name: str) -> bool:
         """删除一个槽位的存档"""
-        with self._lock, self._get_conn() as conn:
-            cursor = conn.execute(
-                "DELETE FROM saves WHERE session_id=? AND slot_name=?",
-                (session_id, slot_name)
-            )
-            conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM saves WHERE session_id=? AND slot_name=?",
+                    (session_id, slot_name)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
 
     # ---------- 关键：normalize 兼容老存档 ----------
     def _normalize_save_data(self, raw: Dict[str, Any]) -> Dict[str, Any]:
