@@ -32,6 +32,13 @@ async function fetchState() {
     document.getElementById('status-scene').textContent = data.scene.name;
     document.getElementById('status-time').textContent = formatGameTime(data.game_time);
     document.getElementById('status-gold').textContent = `金币：${data.player_gold || 0}`;
+    const lvEl = document.getElementById('status-level');
+    if (lvEl) {
+        const lv = data.player_level || 1;
+        const exp = data.player_exp || 0;
+        const need = data.exp_next || lv * 20;
+        lvEl.textContent = `Lv.${lv}（${exp}/${need} EXP）`;
+    }
 
     // 渲染可拿取物品 —— 空了就整块隐藏
     const itemsTitle = document.querySelector('.section-title:has(~ #items-list)');

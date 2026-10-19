@@ -111,6 +111,8 @@ class SessionManager:
             "player_max_hp": player_cfg["hp"],
             "player_attack": player_cfg["attack"],
             "player_defense": player_cfg["defense"],
+            "player_level": int(player_cfg.get("level", 1)),
+            "player_exp": int(player_cfg.get("exp", 0)),
         }
 
         # 独立的事件总线 + 所有引擎模块
@@ -201,5 +203,7 @@ class SessionManager:
             "player_max_hp": p["hp"],
             "player_attack": p["attack"],
             "player_defense": p["defense"],
+            "player_level": int(p.get("level", 1)),
+            "player_exp": int(p.get("exp", 0)),
         }
 

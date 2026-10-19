@@ -83,6 +83,14 @@
         "type": "int",
         "default": 0,
         "min": 0
+      },
+      {
+        "key": "exp",
+        "label": "击杀经验（升级所需 = 等级 × 20）",
+        "type": "int",
+        "default": 0,
+        "min": 0,
+        "max": 99999
       }
     ]
   },

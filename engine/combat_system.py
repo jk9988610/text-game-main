@@ -65,6 +65,30 @@ class CombatSystem:
             self._state["player_gold"] = self._state.get("player_gold", 0) + reward_gold
             response["log"].append(
                 f"战利品：金币 +{reward_gold}（当前金币：{self._state['player_gold']}）")
+        # 经验结算：击杀给经验，够阈值升级（阈值 = level * 20，固定奖励 max_hp+5 / attack+1）
+        exp_gain = int(enemy.get("exp", 0))
+        if exp_gain > 0:
+            level = int(self._state.get("player_level", 1))
+            exp = int(self._state.get("player_exp", 0)) + exp_gain
+            self._state["player_exp"] = exp
+            self._state["player_level"] = level
+            next_need = level * 20
+            response["log"].append(
+                f"获得经验 +{exp_gain}（Lv.{level} {exp}/{next_need}）")
+            leveled = False
+            while self._state["player_exp"] >= level * 20:
+                need = level * 20
+                self._state["player_exp"] -= need
+                level += 1
+                self._state["player_level"] = level
+                self._state["player_max_hp"] = self._state.get("player_max_hp", 50) + 5
+                self._state["player_hp"] = self._state["player_max_hp"]  # 升级回满
+                self._state["player_attack"] = self._state.get("player_attack", 5) + 1
+                leveled = True
+                response["log"].append(
+                    f"升级到 Lv.{level}！最大生命 +5，攻击 +1（当前 {self._state['player_max_hp']} HP / {self._state['player_attack']} ATK）")
+            if leveled:
+                self._bus.publish("PLAYER_LEVELUP", level=level)
         self.end_battle()
         return {"enemy": enemy.get("name", enemy["id"]),
                 "gold": reward_gold, "items": reward_items}

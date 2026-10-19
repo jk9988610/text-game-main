@@ -412,6 +412,13 @@ def get_state():
         "scene": e["scene_manager"].get_current_scene(),
         "player_inventory": e["item_system"].get_player_inventory(),
         "player_gold": e["game_state"].get("player_gold", 0),
+        "player_hp": e["game_state"].get("player_hp", 50),
+        "player_max_hp": e["game_state"].get("player_max_hp", 50),
+        "player_attack": e["game_state"].get("player_attack", 5),
+        "player_defense": e["game_state"].get("player_defense", 2),
+        "player_level": e["game_state"].get("player_level", 1),
+        "player_exp": e["game_state"].get("player_exp", 0),
+        "exp_next": e["game_state"].get("player_level", 1) * 20,
         "flags": e["game_state"].get("flags", {}),
         "game_time": e["game_state"].get("game_time", 0),
         "npcs_here": e["npc_system"].list_npcs_in_scene(scene_id),      # 场景里的 NPC

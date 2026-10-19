@@ -163,6 +163,8 @@ class ConsoleHandler:
             self._state["player_attack"] = player_cfg["attack"]
         if "defense" in player_cfg:
             self._state["player_defense"] = player_cfg["defense"]
+        self._state["player_level"] = int(player_cfg.get("level", 1))
+        self._state["player_exp"] = int(player_cfg.get("exp", 0))
 
         return "游戏已完全重置（场景/背包/敌人/战斗全清）"
 
