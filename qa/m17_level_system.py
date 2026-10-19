@@ -82,6 +82,16 @@ def run(r: QaRunner) -> None:
         r.check("still-level-1", st.get("player_level") == 1, st.get("player_level"))
         r.check("exp-10", st.get("player_exp") == 10, st.get("player_exp"))
 
+        # ---------- S3b 存量 slime 给经验（数据回归）----------
+        r.section("S3b 存量 slime 给经验")
+        c.reset()
+        c.teleport("forest")
+        c.combat_start("slime")
+        last = c.attack_until("slime")
+        st = _st(c)
+        r.check("slime-gives-10-exp", st.get("player_exp") == 10,
+                {"exp": st.get("player_exp"), "log": last.get("log")})
+
         # ---------- S4 两次击杀升级（自建两个 exp=10 敌人）----------
         r.section("S4 二次击杀升级")
         char_b = {
