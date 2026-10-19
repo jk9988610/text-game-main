@@ -553,8 +553,15 @@ class EditorManager:
 
             # 白名单覆盖开局字段，其余字段（action_time/event_rules）保留
             for k in ("game_title", "game_intro", "initial_scene",
-                      "initial_inventory", "initial_gold", "player"):
+                      "initial_inventory", "initial_gold"):
                 config[k] = cleaned[k]
+            # player 合并：payload 没传 skills 时保留原有 skills
+            new_player = dict(cleaned["player"])
+            if "skills" not in (payload.get("player") or {}):
+                existing_skills = (config.get("player") or {}).get("skills")
+                if existing_skills:
+                    new_player["skills"] = existing_skills
+            config["player"] = new_player
             self._write_json("config", config)
             return {"success": True, "message": "游戏设置已保存（对新开游戏/重置生效）"}
 
@@ -732,6 +739,13 @@ class EditorManager:
             "attack": self._to_int(raw_player.get("attack"), -1),
             "defense": self._to_int(raw_player.get("defense"), -1),
         }
+        # 技能列表：可选，字符串列表；不传则不覆盖（upsert_config 里合并）
+        if "skills" in raw_player:
+            raw_skills = raw_player.get("skills")
+            if not isinstance(raw_skills, list):
+                errors.append("玩家技能必须是字符串列表")
+            else:
+                player["skills"] = self._dedupe_strs(raw_skills)
 
         if not title:
             errors.append("游戏标题不能为空")

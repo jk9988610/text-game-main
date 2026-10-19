@@ -50,6 +50,20 @@ DETACH_KEY = "detached_at"   # 脱离时刻的 game_time；键不存在=未脱�
 
 ACTIONS = ("attack", "block", "dodge", "charge", "disengage")
 
+
+def _is_skill(cfg: Dict, action: str) -> bool:
+    """动作在 actions 里且标记 skill=true。"""
+    return bool((cfg.get("actions") or {}).get(action, {}).get("skill"))
+
+
+def _available_actions(cfg: Dict, state: Dict) -> list:
+    """基础动作 + 玩家已学技能（state.player_skills）。"""
+    result = list(ACTIONS)
+    for skill in state.get("player_skills") or []:
+        if skill not in result and _is_skill(cfg, skill):
+            result.append(skill)
+    return result
+
 INTENT_TEXT = {
     "bash": ("撞击", "这一拍它会撞过来"),
     "charge": ("蓄力中", "下一拍重击 10 点！它本拍不会出手——攻击可以打断蓄力"),
@@ -144,6 +158,9 @@ def init_engagement(state: Dict, data: Dict) -> None:
     if not cfg:
         return
     state[AP_KEY] = int(cfg.get("ap_start", 1))
+    if "player_skills" not in state:
+        state["player_skills"] = list(
+            (data.get("config") or {}).get("player", {}).get("skills", []))
     battle = state.get("current_battle")
     if battle:
         battle["beat"] = 1
@@ -171,8 +188,9 @@ def _cost(cfg: Dict, action: str) -> int:
     return int(cfg.get(f"cost_{action}", 0))
 
 
-def _action_payload(cfg: Dict) -> Dict[str, Dict[str, Any]]:
-    """给前端的动作定义；未配置的动作仍从旧字段生成最小定义。"""
+def _action_payload(cfg: Dict, state: Optional[Dict] = None) -> Dict[str, Dict[str, Any]]:
+    """给前端的动作定义；基础动作 + 玩家已学技能。"""
+    actions = _available_actions(cfg, state or {})
     return {
         action: {
             "label": _action_def(cfg, action).get("label", action),
@@ -180,7 +198,7 @@ def _action_payload(cfg: Dict) -> Dict[str, Dict[str, Any]]:
             "tag": _action_def(cfg, action).get("tag", ""),
             "cost": _cost(cfg, action),
         }
-        for action in ACTIONS
+        for action in actions
     }
 
 
@@ -375,7 +393,7 @@ def describe(state: Dict, data: Dict) -> Optional[Dict]:
         "intent": intent,
         "intent_label": "敌人的动作",
         "intent_hint": hidden_hint,
-        "actions": _action_payload(cfg),
+        "actions": _action_payload(cfg, state),
         "costs": {a: _effective_cost(cfg, battle, a, beat) for a in ACTIONS},
     }
 
@@ -440,7 +458,7 @@ def resolve(combat_system, state: Dict, data: Dict, action: str,
     if state.get(DETACH_KEY) is not None:
         response["message"] = "你已经脱离战斗了"
         return response
-    if action not in ACTIONS:
+    if action not in _available_actions(cfg, state):
         response["message"] = f"未知动作：{action}"
         return response
 
@@ -543,6 +561,23 @@ def resolve(combat_system, state: Dict, data: Dict, action: str,
                 response["log"].append("这一击正中蓄力中的【%s】，它的重击被打断了！" % enemy_name)
     elif action == "charge":
         response["log"].append("你沉身拧腰、暗暗蓄力，等待致命的一拍……")
+    elif _is_skill(cfg, action):
+        skill_def = _action_def(cfg, action)
+        base = int(skill_def.get("damage", 0))
+        # 蓄力重击加成：技能声明 consumes_charge 时，readied 状态加 bonus
+        if readied and skill_def.get("consumes_charge"):
+            base += int(cfg.get("player_heavy_bonus", 0))
+        p_damage = max(0, base)
+        label = skill_def.get("label", action)
+        if p_damage > 0:
+            response["log"].append(
+                f"你施放【{label}】，对【{enemy_name}】造成 **{p_damage}** 点伤害！")
+            combat_system.publish("COMBAT_DAMAGE",
+                                  attacker="player", defender=enemy["id"],
+                                  damage=p_damage)
+            damage_logged = True
+        else:
+            response["log"].append(f"你施放【{label}】，但没有造成伤害。")
 
     # ---------- 敌人行动（同拍揭晓）----------
     taken = _enemy_damage_taken(cfg, action, intent, state, enemy)

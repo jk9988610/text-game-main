@@ -9,7 +9,8 @@
   "player": {
     "hp": 50,
     "attack": 5,
-    "defense": 2
+    "defense": 2,
+    "skills": []
   },
   "action_time": {
     "move_scene": 300,
@@ -115,6 +116,14 @@
             ]
           }
         ]
+      },
+      "fireball": {
+        "label": "火球术",
+        "description": "造成 15 点火焰伤害。",
+        "cost": 2,
+        "tag": "法术",
+        "skill": true,
+        "damage": 15
       }
     },
     "heavy_damage": 10,
