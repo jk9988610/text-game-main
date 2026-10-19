@@ -31,7 +31,7 @@ function render(payload) {
 }
 
 async function loadState() {
-  const response = await fetch("/api/apps/first_branch/state");
+  const response = await fetch("/api/story/state");
   const payload = await response.json();
   if (!response.ok || payload.success === false) throw new Error(payload.message);
   render(payload);
@@ -40,7 +40,7 @@ async function loadState() {
 async function choose(index) {
   document.querySelectorAll(".choice").forEach((button) => { button.disabled = true; });
   try {
-    const response = await fetch("/api/apps/first_branch/transition", {
+    const response = await fetch("/api/story/choose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ index }),
@@ -56,7 +56,7 @@ async function choose(index) {
 
 $("restart").addEventListener("click", async () => {
   try {
-    const response = await fetch("/api/apps/first_branch/reset", { method: "POST" });
+    const response = await fetch("/api/story/reset", { method: "POST" });
     const payload = await response.json();
     if (!response.ok || payload.success === false) throw new Error(payload.message);
     render(payload);
@@ -65,12 +65,46 @@ $("restart").addEventListener("click", async () => {
   }
 });
 
-const savePanel = AppSavePanel.create({ appId: "first_branch", onState: render });
-$("save-panel").appendChild(savePanel.root);
+function setSaveStatus(text) {
+  const node = $("save-status");
+  if (node) node.textContent = text || "";
+}
+
+$("save-btn").addEventListener("click", async () => {
+  try {
+    const response = await fetch("/api/story/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot: "quick" }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.success === false) throw new Error(payload.message);
+    setSaveStatus("已保存");
+    setTimeout(() => setSaveStatus(""), 2000);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
+$("load-btn").addEventListener("click", async () => {
+  try {
+    const response = await fetch("/api/story/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot: "quick" }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.success === false) throw new Error(payload.message);
+    render(payload);
+    setSaveStatus("已读取");
+    setTimeout(() => setSaveStatus(""), 2000);
+  } catch (error) {
+    showError(error.message);
+  }
+});
+
 (async () => {
   try {
-    await AppSavePanel.chooseResume({ appId: "first_branch", onState: render });
     await loadState();
-    await savePanel.refresh();
   } catch (error) { showError(error.message); }
 })();

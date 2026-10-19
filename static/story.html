@@ -27,14 +27,17 @@
       <p id="story-error" class="error" role="alert" hidden></p>
     </article>
 
-    <div id="save-panel"></div>
+    <div id="save-panel" class="save-panel">
+      <button id="save-btn" type="button">保存</button>
+      <button id="load-btn" type="button">读取</button>
+      <span id="save-status" class="save-status"></span>
+    </div>
     <footer class="story-footer">
       <span id="state-summary"></span>
       <a href="/static/editor.html">打开编辑器</a>
     </footer>
   </main>
   <script src="js/auth-panel.js"></script>
-  <script src="js/app-save-panel.js"></script>
   <script src="story.js"></script>
 </body>
 </html>
