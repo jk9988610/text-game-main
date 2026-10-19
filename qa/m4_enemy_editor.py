@@ -24,6 +24,7 @@ SLIME = {
     "defense": 1,
     "reward_items": ["healing_potion"],
     "reward_gold": 2,
+    "tags": ["enemy"],
 }
 
 
@@ -35,14 +36,14 @@ def run(r: QaRunner) -> None:
         r.section("E1 编辑器数据包含敌人")
         d = c.editor_data()
         r.check("enemies-table-present",
-                isinstance(d.get("enemies"), dict) and "cave_goblin" in d["enemies"],
+                isinstance(d.get("enemies"), dict) and "slime" in d["enemies"],
                 d.get("enemies"))
 
         # ---------- E2 新建 qa_slime ----------
         r.section("E2 新建测试敌人")
-        res = c.editor_save("enemy", SLIME)
+        res = c.editor_save("character", SLIME)
         r.check("create-slime-ok", res.get("success") is True, res)
-        got = c.editor_data()["enemies"].get("qa_slime")
+        got = c.editor_data()["characters"].get("qa_slime")
         r.check("slime-fields",
                 got and got["hp"] == 22 and got["attack"] == 3 and got["defense"] == 1
                 and got["reward_gold"] == 2 and got["reward_items"] == ["healing_potion"],
@@ -51,16 +52,16 @@ def run(r: QaRunner) -> None:
         # ---------- E3 校验拦截 ----------
         r.section("E3 敌人数值/引用校验")
         r.check("hp0-blocked",
-                c.editor_save("enemy", {**SLIME, "id": "qa_bad", "hp": 0}).get("success") is False)
+                c.editor_save("character", {**SLIME, "id": "qa_bad", "hp": 0}).get("success") is False)
         r.check("empty-name-blocked",
-                c.editor_save("enemy", {**SLIME, "id": "qa_bad", "name": "  "}).get("success") is False)
+                c.editor_save("character", {**SLIME, "id": "qa_bad", "name": "  "}).get("success") is False)
         r.check("bad-reward-item-blocked",
-                c.editor_save("enemy", {**SLIME, "id": "qa_bad",
-                                        "reward_items": ["qa_no_such_item"]}).get("success") is False)
+                c.editor_save("character", {**SLIME, "id": "qa_bad",
+                                            "reward_items": ["qa_no_such_item"]}).get("success") is False)
         r.check("negative-attack-blocked",
-                c.editor_save("enemy", {**SLIME, "id": "qa_bad", "attack": -5}).get("success") is False)
+                c.editor_save("character", {**SLIME, "id": "qa_bad", "attack": -5}).get("success") is False)
         r.check("bad-enemy-not-saved",
-                "qa_bad" not in c.editor_data()["enemies"])
+                "qa_bad" not in c.editor_data()["characters"])
 
         # ---------- E4 把史莱姆挂到森林 ----------
         r.section("E4 场景敌人配置 + 新游戏生效")
@@ -79,6 +80,7 @@ def run(r: QaRunner) -> None:
         c.reset()
         c.give("healing_potion")
         c.teleport("forest")
+        gold_before = c.state().get("player_gold", 0)
         r.check("battle-start", c.combat_start("qa_slime").get("success") is True)
         c.attack()
         c.attack()
@@ -98,7 +100,8 @@ def run(r: QaRunner) -> None:
         kill = c.attack()
         r.check("slime-killed", kill.get("defeated") == "qa_slime", kill)
         r.check("kill-log-4-lines", len(kill.get("log", [])) == 4, kill.get("log"))
-        r.check("gold-reward-2", c.state().get("player_gold") == 2, c.state().get("player_gold"))
+        r.check("gold-reward-2", c.state().get("player_gold") == gold_before + 2,
+                {"before": gold_before, "after": c.state().get("player_gold")})
         r.check("loot-potion-take", c.take("healing_potion").get("success") is True)
 
         # ---------- E6 满血喝药拒绝 / 非消耗品不能喝 ----------
@@ -112,13 +115,13 @@ def run(r: QaRunner) -> None:
                 refused)
         r.check("potion-still-in-bag", "healing_potion" in inventory_ids(c.state()))
         r.check("sword-not-drinkable",
-                c.drink("rusty_sword").get("success") is False)
-        r.check("sword-still-in-bag", "rusty_sword" in inventory_ids(c.state()))
+                c.drink("iron_sword").get("success") is False)
+        r.check("sword-still-in-bag", "iron_sword" in inventory_ids(c.state()))
 
         # ---------- E7 删除保护 ----------
         r.section("E7 引用删除保护")
         r.check("referenced-enemy-blocked",
-                c.editor_delete("enemy", "qa_slime").get("success") is False)
+                c.editor_delete("character", "qa_slime").get("success") is False)
         r.check("potion-delete-blocked",
                 c.editor_delete("item", "healing_potion").get("success") is False)
         r.check("coin-delete-blocked",
@@ -128,7 +131,7 @@ def run(r: QaRunner) -> None:
         r.section("E8 存活战斗保护与清理")
         # E6 的战斗仍在（满血，没打掉血）
         r.check("delete-in-battle-blocked",
-                c.editor_delete("enemy", "qa_slime").get("success") is False)
+                c.editor_delete("character", "qa_slime").get("success") is False)
         last = c.attack_until("qa_slime")
         r.check("slime-killed-for-delete", last.get("defeated") == "qa_slime", last)
         forest_ok = c.editor_data()["scenes"]["forest"]
@@ -136,22 +139,35 @@ def run(r: QaRunner) -> None:
                                      if e != "qa_slime"]
         c.editor_save("scene", forest_ok)
         r.check("delete-after-battle-ok",
-                c.editor_delete("enemy", "qa_slime").get("success") is True)
+                c.editor_delete("character", "qa_slime").get("success") is True)
         r.check("slime-gone-from-editor",
-                "qa_slime" not in c.editor_data()["enemies"])
+                "qa_slime" not in c.editor_data()["characters"])
         r.check("slime-gone-from-render",
                 "qa_slime" not in enemy_ids_here(c.state()), enemy_ids_here(c.state()))
 
-        # ---------- E9 回归：哥布林无金币掉落键 → 击杀后金币仍为 0 ----------
-        r.section("E9 哥布林回归（reward_gold 缺省=0）")
+        # ---------- E9 回归：无金币掉落键的敌人 → 击杀后金币不变 ----------
+        r.section("E9 无金币掉落敌人回归（reward_gold 缺省=0）")
+        NOGOLD = {
+            "id": "qa_nogold",
+            "name": "QA无金",
+            "description": "QA 测试用，不配 reward_gold。",
+            "hp": 1, "attack": 1, "defense": 0,
+            "tags": ["enemy"],
+        }
+        r.check("nogold-create",
+                c.editor_save("character", NOGOLD).get("success") is True)
+        cave = c.editor_data()["scenes"]["cave"]
+        cave["enemies_here"] = cave.get("enemies_here", []) + ["qa_nogold"]
+        c.editor_save("scene", cave)
         c.reset()
         c.teleport("cave")
-        r.check("goblin-battle-start",
-                c.combat_start("cave_goblin").get("success") is True)
-        last = c.attack_until("cave_goblin")
-        r.check("goblin-killed", last.get("defeated") == "cave_goblin", last)
-        r.check("goblin-no-gold", c.state().get("player_gold") == 0,
-                c.state().get("player_gold"))
+        gold_before = c.state().get("player_gold", 0)
+        r.check("nogold-battle-start",
+                c.combat_start("qa_nogold").get("success") is True)
+        last = c.attack_until("qa_nogold")
+        r.check("nogold-killed", last.get("defeated") == "qa_nogold", last)
+        r.check("nogold-no-gold", c.state().get("player_gold") == gold_before,
+                {"before": gold_before, "after": c.state().get("player_gold")})
 
     finally:
         editor_restore(c, snap)
