@@ -22,7 +22,7 @@ from engine import (
     InteractiveStoryRuntime,
     RuntimeDefinition,
     TaskFlowRuntime,
-    OrganizationManager,
+
     ProcessInstanceManager,
     RoleManager,
     beat_combat,
@@ -57,7 +57,7 @@ APP_SESSION_MANAGER = ApplicationSessionManager(APP_REGISTRY)
 APP_SAVE_MANAGER = ApplicationSaveManager(APP_REGISTRY, APP_SESSION_MANAGER)
 APP_SESSION_MANAGER.set_save_manager(APP_SAVE_MANAGER)
 ROLE_MANAGER = RoleManager()
-ORGANIZATION_MANAGER = OrganizationManager()
+
 PROCESS_MANAGER = ProcessInstanceManager()
 
 
@@ -418,10 +418,10 @@ def _current_user_context():
     if not roles:
         ROLE_MANAGER.assign(user_id, "applicant")
         roles.add("applicant")
-    organizations = ORGANIZATION_MANAGER.list_for_user(user_id)
-    active_id = session.get("organization_id")
-    active = next((org for org in organizations if org["id"] == active_id), None)
-    effective_roles = set(active["labels"]) if active else roles
+    organizations = []
+    active = None
+    effective_roles = set(roles)
+
     return {"user_id": user_id, "username": user["username"],
             "roles": sorted(effective_roles), "global_roles": sorted(roles),
             "organizations": organizations, "active_organization": active, "demo": False}
@@ -1127,108 +1127,9 @@ def auth_logout():
     return jsonify({"success": True, "message": "已退出登录"})
 
 
-@app.route('/api/organizations', methods=['GET'])
-def organization_list():
-    context = _current_user_context()
-    if context["demo"]:
-        return jsonify({"success": True, "organizations": [], "active": None})
-    return jsonify({"success": True, "organizations": context["organizations"], "active": context["active_organization"]})
-
-
-@app.route('/api/organizations', methods=['POST'])
-def organization_create():
-    context = _current_user_context()
-    if context["demo"]:
-        return jsonify({"success": False, "message": "请先登录后创建组织"}), 401
-    try:
-        organization = ORGANIZATION_MANAGER.create(
-            (request.get_json(silent=True) or {}).get("name", ""), context["user_id"]
-        )
-    except ValueError as exc:
-        return jsonify({"success": False, "message": str(exc)}), 400
-    session["organization_id"] = organization["id"]
-    return jsonify({"success": True, "organization": organization})
-
-
-@app.route('/api/organizations/join', methods=['POST'])
-def organization_join():
-    context = _current_user_context()
-    if context["demo"]:
-        return jsonify({"success": False, "message": "请先登录后加入组织"}), 401
-    try:
-        organization = ORGANIZATION_MANAGER.join(
-            (request.get_json(silent=True) or {}).get("join_code", ""), context["user_id"]
-        )
-    except KeyError as exc:
-        return jsonify({"success": False, "message": str(exc)}), 404
-    session["organization_id"] = organization["id"]
-    return jsonify({"success": True, "organization": organization})
-
-
-@app.route('/api/organizations/select', methods=['POST'])
-def organization_select():
-    context = _current_user_context()
-    if context["demo"]:
-        return jsonify({"success": False, "message": "请先登录"}), 401
-    organization_id = (request.get_json(silent=True) or {}).get("organization_id")
-    if not any(org["id"] == organization_id for org in context["organizations"]):
-        return jsonify({"success": False, "message": "不是该组织成员"}), 403
-    session["organization_id"] = organization_id
-    return jsonify({"success": True, "user": _current_user_context()})
-
-
-@app.route('/api/organizations/<int:organization_id>/members', methods=['GET'])
-def organization_members(organization_id):
-    context = _current_user_context()
-    if not context["active_organization"] or context["active_organization"]["id"] != organization_id:
-        return jsonify({"success": False, "message": "请先选择组织"}), 403
-    return jsonify({"success": True, "members": ORGANIZATION_MANAGER.members(organization_id)})
-
-
-@app.route('/api/organizations/<int:organization_id>/members/<int:user_id>/labels', methods=['POST'])
-def organization_labels(organization_id, user_id):
-    context = _current_user_context()
-    active = context["active_organization"]
-    if not active or active["id"] != organization_id or "admin" not in active["labels"]:
-        return jsonify({"success": False, "message": "只有组织管理员可以修改成员标签"}), 403
-    try:
-        ORGANIZATION_MANAGER.set_labels(
-            organization_id, user_id, (request.get_json(silent=True) or {}).get("labels", [])
-        )
-    except (KeyError, ValueError) as exc:
-        return jsonify({"success": False, "message": str(exc)}), 400
-    return jsonify({"success": True, "members": ORGANIZATION_MANAGER.members(organization_id)})
-
-
 @app.route('/api/auth/roles', methods=['GET'])
 def auth_roles():
     return jsonify({"success": True, "user": _current_user_context()})
-
-
-@app.route('/api/auth/roles/<int:user_id>', methods=['POST'])
-def assign_role(user_id):
-    denied = _require_capability("edit_template")
-    if denied:
-        return denied
-    role = (request.get_json(silent=True) or {}).get("role")
-    if role not in VALID_ROLES:
-        return jsonify({"success": False, "message": "无效角色"}), 400
-    try:
-        ROLE_MANAGER.assign(user_id, role)
-    except ValueError as exc:
-        return jsonify({"success": False, "message": str(exc)}), 400
-    return jsonify({"success": True, "user_id": user_id, "roles": ROLE_MANAGER.roles_for(user_id)})
-
-
-@app.route('/api/auth/roles/<int:user_id>', methods=['DELETE'])
-def revoke_role(user_id):
-    denied = _require_capability("edit_template")
-    if denied:
-        return denied
-    role = (request.get_json(silent=True) or {}).get("role")
-    if role not in VALID_ROLES:
-        return jsonify({"success": False, "message": "无效角色"}), 400
-    return jsonify({"success": True, "deleted": ROLE_MANAGER.revoke(user_id, role), "roles": ROLE_MANAGER.roles_for(user_id)})
 
 
 @app.route('/api/auth/me', methods=['GET'])

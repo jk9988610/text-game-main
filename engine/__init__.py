@@ -13,7 +13,6 @@ from .save_manager import SaveManager
 from .auth_manager import AuthManager
 from .event_rules import DeclarativeRules
 from . import beat_combat
-from .organization_manager import OrganizationManager, ORG_LABELS
 from .process_instance_manager import ProcessInstanceManager
 from .role_manager import RoleManager, VALID_ROLES
 from .runtime import (
@@ -49,8 +48,6 @@ __all__ = [
     "RoleManager",
     "VALID_ROLES",
     "ProcessInstanceManager",
-    "OrganizationManager",
-    "ORG_LABELS",
     "ActionContext",
     "ActionRegistry",
     "AppRegistry",
