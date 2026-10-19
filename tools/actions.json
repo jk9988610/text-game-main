@@ -1,0 +1,6 @@
+{
+  "restart": {
+    "label": "重启服务",
+    "script": "tools/restart_server.ps1"
+  }
+}
