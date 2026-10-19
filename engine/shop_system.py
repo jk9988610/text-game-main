@@ -35,6 +35,7 @@ class ShopSystem:
                 "id": item_id,
                 "name": item.get("name", item_id),
                 "price": int(entry.get("price", 0)),
+                **({"stock": int(entry["stock"])} if "stock" in entry else {}),
             })
         return result
 
@@ -57,6 +58,11 @@ class ShopSystem:
             response["message"] = f"商品数据不存在：{item_id}"
             return response
 
+        # 限量商店：stock 是整数且 <= 0 时售罄
+        if "stock" in entry and int(entry["stock"]) <= 0:
+            response["message"] = f"{self._data['items'][item_id]['name']}已售罄"
+            return response
+
         price = int(entry.get("price", 0))
         gold = self._state.get("player_gold", 0)
         if gold < price:
@@ -66,6 +72,10 @@ class ShopSystem:
         # 成交：扣款 + 入包（允许重复购买，背包里可有多瓶）
         self._state["player_gold"] = gold - price
         self._state["player_inventory"].append(item_id)
+        if "stock" in entry:
+            entry["stock"] = int(entry["stock"]) - 1
+            response["stock_changed"] = True
+            response["stock"] = entry["stock"]
         self._bus.publish("ITEM_BOUGHT", item_id=item_id, price=price, from_scene=sid)
 
         response["success"] = True

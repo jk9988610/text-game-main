@@ -361,7 +361,13 @@ class EditorManager:
             except (TypeError, ValueError):
                 price = -1  # 交给校验报错
             seen_shop.add(gid)
-            shop_items.append({"item_id": gid, "price": price})
+            entry = {"item_id": gid, "price": price}
+            if "stock" in g:
+                try:
+                    entry["stock"] = int(g["stock"])
+                except (TypeError, ValueError):
+                    entry["stock"] = -1  # 交给校验报错
+            shop_items.append(entry)
 
         cleaned = {
             "id": sid,
@@ -421,6 +427,8 @@ class EditorManager:
                 errors.append(f"商店售卖的物品不存在：{gid}（请先在物品页新建）")
             if not isinstance(g["price"], int) or g["price"] < 0:
                 errors.append(f"商品【{gid}】价格必须是非负整数")
+            if "stock" in g and (not isinstance(g["stock"], int) or g["stock"] < 0):
+                errors.append(f"商品【{gid}】库存必须是非负整数")
 
         # 敌人：数据文件里没有时只给警告（允许先布置场景再建敌人）
         for eid in scene["enemies_here"]:
@@ -564,6 +572,11 @@ class EditorManager:
             config["player"] = new_player
             self._write_json("config", config)
             return {"success": True, "message": "游戏设置已保存（对新开游戏/重置生效）"}
+
+    def save_scenes(self, scenes: Dict[str, Any]) -> None:
+        """公开包装：路由层在非编辑器操作（如商店扣库存）后持久化场景数据。"""
+        with self._lock:
+            self._write_json("scenes", scenes)
 
     # ---------- 事件规则 upsert / delete ----------
     def upsert_event_rule(self, config: Dict[str, Any], scenes: Dict[str, Any],

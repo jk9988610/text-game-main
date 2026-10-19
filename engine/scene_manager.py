@@ -76,6 +76,7 @@ class SceneManager:
                     "name": self._data["items"].get(g.get("item_id", ""), {}).get(
                         "name", g.get("item_id", "")),
                     "price": int(g.get("price", 0)),
+                    **({"stock": int(g["stock"])} if "stock" in g else {}),
                 }
                 for g in scene.get("shop_items", [])
                 if g.get("item_id") in self._data["items"]

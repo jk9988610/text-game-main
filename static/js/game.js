@@ -62,10 +62,19 @@ async function fetchState() {
         shopGoods.forEach(goods => {
             const btn = document.createElement('button');
             btn.className = 'action-btn shop';
-            const affordable = (data.player_gold || 0) >= goods.price;
-            btn.textContent = `购买：${goods.name}（${goods.price} 金币）`;
-            btn.style.opacity = affordable ? '' : '0.55';
-            btn.onclick = () => doAction('buy_item', goods.id);
+            const soldOut = goods.stock !== undefined && goods.stock <= 0;
+            if (soldOut) {
+                btn.textContent = `${goods.name}（售罄）`;
+                btn.disabled = true;
+                btn.style.opacity = '0.4';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                const affordable = (data.player_gold || 0) >= goods.price;
+                const stockText = goods.stock !== undefined ? ` · 剩 ${goods.stock}` : '';
+                btn.textContent = `购买：${goods.name}（${goods.price} 金币${stockText}）`;
+                btn.style.opacity = affordable ? '' : '0.55';
+                btn.onclick = () => doAction('buy_item', goods.id);
+            }
             shopList.appendChild(btn);
         });
     }

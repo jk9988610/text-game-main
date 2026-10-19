@@ -463,6 +463,8 @@ def handle_action():
         result = e["scene_manager"].move_to(action_target)
     elif action_type == "buy_item":
         result = e["shop_system"].buy_item(action_target)
+        if result.get("success") and result.get("stock_changed"):
+            EDITOR.save_scenes(GAME_DATA["scenes"])
     elif action_type == "use_item":
         result = e["item_system"].use_item(action_target, data.get("target_id"))
     else:
