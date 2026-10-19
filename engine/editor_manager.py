@@ -1344,7 +1344,7 @@ class EditorManager:
         fd, tmp_path = tempfile.mkstemp(
             prefix=".tmp_", suffix=".json", dir=os.path.dirname(path))
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, path)
         except Exception:
