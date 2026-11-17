@@ -81,6 +81,9 @@
     rendering: false,       // 程序化渲染中：屏蔽连线事件回触发（防递归）
     multi: new Set(),
     group: null,
+    undo: [],
+    undoLimit: 50,
+    baseline: null,
     dragBox: null,
     panning: null,          // 平移键按下时的平移状态 {x,y,cx,cy}
     pending: null,          // 左键按下候选点击 {dfId,x,y,moved}，mouseup 判定点击/拖卡
@@ -243,6 +246,7 @@
     view.npcId = id;
     view.selNode = null;
     view.dirty = false;
+    view.undo = [];
     updateDirty();
     render();
     showPlaceholder();
@@ -281,6 +285,7 @@
     renderStartCard(g, npc);
     view.rendering = false;
     fillNodeDatalist(npc);
+    view.baseline = snapshotNpc();
     // 抽屉按当前模式保持
     if (view.inspMode === "entry") renderEntryInspector();
     else if (view.selNode && npc.nodes[view.selNode]) renderInspector();
@@ -435,7 +440,56 @@
     ed.on("translate", updateZoomLabel);
   }
 
+  /* ---------- 撤销栈 ----------
+   * 数据模型：curNpc() 直接引用 DATA.npcs[npcId]，改动即时生效。
+   * 快照 = 当前 npc 数据 + 当前坐标（layout）。
+   * markDirty 前把旧 baseline 压栈，500ms 内的连续改动合并为一次。
+   */
+  function getLayoutRef() {
+    if (!DATA.layouts) DATA.layouts = {};
+    if (!DATA.layouts[view.npcId]) DATA.layouts[view.npcId] = {};
+    return DATA.layouts[view.npcId];
+  }
+  function snapshotNpc() {
+    const npc = curNpc();
+    return {
+      npc: npc ? JSON.parse(JSON.stringify(npc)) : null,
+      layout: JSON.parse(JSON.stringify(getLayoutRef())),
+    };
+  }
+  function undo() {
+    if (!view.undo.length) { toast('没有可撤销的操作', 'error'); return; }
+    const snap = view.undo.pop();
+    const npc = curNpc();
+    if (!npc) return;
+    for (const k in npc) delete npc[k];
+    Object.assign(npc, JSON.parse(JSON.stringify(snap.npc)));
+    const lay = getLayoutRef();
+    for (const k in lay) delete lay[k];
+    Object.assign(lay, JSON.parse(JSON.stringify(snap.layout)));
+    view.dirty = true;
+    updateDirty();
+    view.baseline = snapshotNpc();
+    render();
+    if (settings.autosave) {
+      clearTimeout(view.saveTimer);
+      view.saveTimer = setTimeout(() => save({ silent: true }), 1500);
+    }
+    toast('已撤销');
+  }
+
   function markDirty() {
+    if (view.baseline) {
+      const last = view.undo[view.undo.length - 1];
+      const now = Date.now();
+      if (!last || now - last.at > 500) {
+        view.undo.push({ ...view.baseline, at: now });
+        if (view.undo.length > view.undoLimit) view.undo.shift();
+      } else {
+        last.at = now;
+      }
+    }
+    view.baseline = snapshotNpc();
     view.dirty = true;
     updateDirty();
     if (settings.autosave) {
@@ -800,6 +854,8 @@
     }
     if (!data.success) { toast(data.message, "error"); return; }
     view.dirty = false;
+    view.undo = [];
+    view.baseline = snapshotNpc();
     updateDirty();
     if (silent) return;
     await window.EditorActions.reloadData();   // 手动保存走统一重拉（保持画布模式）
@@ -1154,6 +1210,13 @@
       if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
         e.preventDefault();
         setPanel(inspector().classList.contains("collapsed"));
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z") && !e.shiftKey) {
+        const t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+          return;  // 输入框内交给浏览器原生撤销
+        }
+        e.preventDefault(); undo();
       }
     });
 
